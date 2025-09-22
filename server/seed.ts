@@ -217,6 +217,12 @@ export async function seedDefaultData() {
         description: "رسوم التوصيل الافتراضية (ريال)"
       },
       {
+        key: "delivery_fee_per_km",
+        value: "1.5",
+        category: "general",
+        description: "رسوم التوصيل لكل كيلومتر (ريال)"
+      },
+      {
         key: "minimum_order_default",
         value: "25",
         category: "general",

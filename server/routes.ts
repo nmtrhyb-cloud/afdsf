@@ -1062,5 +1062,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/orders", ordersRoutes);
 
   const httpServer = createServer(app);
+  
+  // WebSocket للتحديثات الفورية
+  const WebSocket = require('ws');
+  const wss = new WebSocket.Server({ server: httpServer });
+  
+  // تخزين الاتصالات النشطة
+  const activeConnections = new Map();
+  
+  wss.on('connection', (ws: any, req: any) => {
+    const connectionId = randomUUID();
+    activeConnections.set(connectionId, ws);
+    
+    console.log(`🔗 اتصال WebSocket جديد: ${connectionId}`);
+    
+    ws.on('message', (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        
+        // تسجيل نوع المستخدم والمعرف للاتصال
+        if (data.type === 'register') {
+          ws.userType = data.userType; // 'admin', 'driver', 'customer'
+          ws.userId = data.userId;
+          console.log(`📝 تم تسجيل المستخدم: ${data.userType} - ${data.userId}`);
+        }
+      } catch (error) {
+        console.error('خطأ في معالجة رسالة WebSocket:', error);
+      }
+    });
+    
+    ws.on('close', () => {
+      activeConnections.delete(connectionId);
+      console.log(`❌ انقطع اتصال WebSocket: ${connectionId}`);
+    });
+  });
+  
+  // دالة لإرسال التحديثات للمستخدمين
+  const broadcastUpdate = (type: string, data: any, targetUserType?: string, targetUserId?: string) => {
+    activeConnections.forEach((ws: any) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        // إرسال للمستخدمين المحددين أو للجميع
+        if (!targetUserType || ws.userType === targetUserType) {
+          if (!targetUserId || ws.userId === targetUserId) {
+            ws.send(JSON.stringify({ type, data }));
+          }
+        }
+      }
+    });
+  };
+  
+  // إضافة broadcastUpdate للسياق العام
+  (global as any).broadcastUpdate = broadcastUpdate;
+  
   return httpServer;
 }

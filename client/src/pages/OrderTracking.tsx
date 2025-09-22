@@ -31,6 +31,55 @@ export default function OrderTracking() {
   const { orderId } = useParams<{ orderId: string }>();
   const [, setLocation] = useLocation();
   
+  // إعداد WebSocket للتحديثات الفورية
+  useEffect(() => {
+    if (!orderId) return;
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('🔗 تم الاتصال بـ WebSocket لتتبع الطلب');
+        ws.send(JSON.stringify({
+          type: 'register',
+          userType: 'customer',
+          userId: 'guest',
+          orderId: orderId
+        }));
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          if (message.type === 'order_status_updated' && message.data.orderId === orderId) {
+            // إعادة تحميل بيانات الطلب
+            refetch();
+            
+            // إشعار المستخدم
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('تحديث الطلب', {
+                body: message.data.message,
+                icon: '/logo.png'
+              });
+            }
+          }
+        } catch (error) {
+          console.error('خطأ في معالجة رسالة WebSocket:', error);
+        }
+      };
+      
+      return () => {
+        ws.close();
+      };
+    } catch (error) {
+      console.error('خطأ في إنشاء اتصال WebSocket:', error);
+    }
+  }, [orderId]);
+  
   // Mock order data - in real app this would come from API
   const [order] = useState<OrderDetails>({
     id: orderId || '12345',

@@ -35,6 +35,61 @@ function MainApp() {
   // const { userType, loading } = useAuth(); // تم إزالة نظام المصادقة
   const { location } = useLocation();
   const [showLocationModal, setShowLocationModal] = useState(true);
+  
+  // إعداد WebSocket للتحديثات الفورية
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('🔗 تم الاتصال بـ WebSocket');
+        // تسجيل نوع المستخدم
+        ws.send(JSON.stringify({
+          type: 'register',
+          userType: 'customer',
+          userId: 'guest'
+        }));
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          switch (message.type) {
+            case 'ui_setting_updated':
+              // إعادة تحميل إعدادات الواجهة
+              window.location.reload();
+              break;
+            case 'order_status_updated':
+              // إشعار تحديث حالة الطلب
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('تحديث الطلب', {
+                  body: message.data.message,
+                  icon: '/logo.png'
+                });
+              }
+              break;
+          }
+        } catch (error) {
+          console.error('خطأ في معالجة رسالة WebSocket:', error);
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('❌ انقطع الاتصال مع WebSocket');
+      };
+      
+      // تنظيف الاتصال عند إلغاء تحميل المكون
+      return () => {
+        ws.close();
+      };
+    } catch (error) {
+      console.error('خطأ في إنشاء اتصال WebSocket:', error);
+    }
+  }, []);
 
   // تم إزالة loading state ومراجع المصادقة
 

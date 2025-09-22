@@ -40,22 +40,95 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ onLogout }) =>
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const driverId = 'driver1'; // Default for testing
+  // الحصول على معرف السائق من localStorage
+  const [driverId, setDriverId] = useState<string>('');
+  
+  useEffect(() => {
+    const driverUser = localStorage.getItem('driver_user');
+    if (driverUser) {
+      try {
+        const userData = JSON.parse(driverUser);
+        setDriverId(userData.id);
+      } catch (error) {
+        console.error('خطأ في تحليل بيانات السائق:', error);
+        onLogout();
+      }
+    } else {
+      onLogout();
+    }
+  }, [onLogout]);
+  
+  // إعداد WebSocket للتحديثات الفورية
+  useEffect(() => {
+    if (!driverId) return;
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('🔗 تم الاتصال بـ WebSocket للسائق');
+        ws.send(JSON.stringify({
+          type: 'register',
+          userType: 'driver',
+          userId: driverId
+        }));
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          switch (message.type) {
+            case 'order_assigned':
+              // طلب جديد تم تعيينه للسائق
+              toast({
+                title: "طلب جديد!",
+                description: `تم تعيين طلب جديد لك`,
+              });
+              queryClient.invalidateQueries({ queryKey: [`/api/drivers/${driverId}/orders`] });
+              break;
+            case 'new_order_available':
+              // طلب جديد متاح
+              toast({
+                title: "طلب جديد متاح!",
+                description: "يوجد طلب جديد متاح للتوصيل",
+              });
+              queryClient.invalidateQueries({ queryKey: [`/api/drivers/${driverId}/available-orders`] });
+              break;
+          }
+        } catch (error) {
+          console.error('خطأ في معالجة رسالة WebSocket:', error);
+        }
+      };
+      
+      return () => {
+        ws.close();
+      };
+    } catch (error) {
+      console.error('خطأ في إنشاء اتصال WebSocket:', error);
+    }
+  }, [driverId, toast, queryClient]);
 
   // Fetch driver info
   const { data: driver } = useQuery<Driver>({
     queryKey: [`/api/drivers/${driverId}`],
+    enabled: !!driverId,
   });
 
   // Fetch available orders
   const { data: availableOrders, isLoading: ordersLoading } = useQuery<Order[]>({
     queryKey: [`/api/drivers/${driverId}/available-orders`],
+    enabled: !!driverId,
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
   // Fetch driver orders
   const { data: myOrders } = useQuery<Order[]>({
     queryKey: [`/api/drivers/${driverId}/orders`],
+    enabled: !!driverId,
   });
 
   // Fetch driver stats

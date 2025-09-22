@@ -579,6 +579,29 @@ router.put("/orders/:id/status", async (req: any, res) => {
       return res.status(404).json({ error: "الطلب غير موجود" });
     }
     
+    // إرسال تحديث فوري للعميل والسائق
+    if ((global as any).broadcastUpdate) {
+      // إشعار العميل
+      (global as any).broadcastUpdate('order_status_updated', {
+        orderId: id,
+        status,
+        message: getStatusMessage(status)
+      }, 'customer', updatedOrder.customerPhone);
+      
+      // إشعار السائق إذا تم تعيينه
+      if (driverId) {
+        (global as any).broadcastUpdate('order_assigned', {
+          orderId: id,
+          order: updatedOrder
+        }, 'driver', driverId);
+      }
+      
+      // إشعار المديرين
+      (global as any).broadcastUpdate('order_updated', {
+        orderId: id,
+        status
+      }, 'admin');
+    }
     // Note: تتبع الطلبات (order tracking) ليس منفذاً في MemStorage بعد
     // يمكن إضافته لاحقاً إذا لزم الأمر
     
@@ -589,6 +612,19 @@ router.put("/orders/:id/status", async (req: any, res) => {
   }
 });
 
+// دالة مساعدة لرسائل الحالة
+function getStatusMessage(status: string): string {
+  const statusMessages: Record<string, string> = {
+    'pending': 'تم استلام طلبك وجاري المراجعة',
+    'confirmed': 'تم تأكيد طلبك وجاري التحضير',
+    'preparing': 'جاري تحضير طلبك',
+    'ready': 'طلبك جاهز وجاري البحث عن موصل',
+    'on_way': 'الموصل في الطريق إليك',
+    'delivered': 'تم تسليم طلبك بنجاح',
+    'cancelled': 'تم إلغاء طلبك'
+  };
+  return statusMessages[status] || `تم تحديث حالة طلبك إلى ${status}`;
+}
 // إدارة السائقين
 router.get("/drivers", async (req, res) => {
   try {
