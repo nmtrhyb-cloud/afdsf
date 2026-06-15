@@ -1,175 +1,122 @@
-# طمطوم - Tamtom | منصة التجارة الإلكترونية للخضار والفواكه في السعودية
+# واصل - Wasel Food Delivery System
 
-## Overview
-منصة متكاملة لتجارة الخضار والفواكه إلكترونياً في المملكة العربية السعودية. تحتوي على ثلاثة واجهات: تطبيق العميل، تطبيق السائق، ولوحة الإدارة.
-Currency: SAR (ريال سعودي / ر.س) — All prices in ar-SA locale.
-
-## Flutter App Integration
-- تطبيق Flutter (`flutter_app/`) يعرض الموقع عبر WebView
-- شاشة البداية في Flutter تجلب إعداداتها (الشعار، العنوان، الألوان) من السيرفر عبر `/api/flutter/app-config`
-- تم حذف شاشة الترحيب الخضراء من تطبيق العميل (web) بالكامل - Flutter يتولى ذلك
-- عند الفتح من Flutter: يُكتشف تلقائياً عبر User-Agent ويُتجاوز تحميل الـ splash
-- دعم كامل للروابط الخارجية: WhatsApp, tel, SMS, mailto, Telegram, Maps
-- رسالة تأكيد عند الخروج من التطبيق
-- رسالة "لا يوجد اتصال بالإنترنت" مع إمكانية إعادة المحاولة
-- صلاحيات Android كاملة: كاميرا، موقع، هاتف، رسائل، واتساب، تيليجرام
-- صلاحيات iOS كاملة: كاميرا، موقع، جهات اتصال
-- رابط السيرفر في `flutter_app/lib/utils/constants.dart` - يجب تحديثه عند تغيير الاستضافة
-
-## Replit Setup Notes
-- **Workflow**: `npm run dev` on port 5000 (webview)
-- **Database**: PostgreSQL via Replit built-in (DATABASE_URL env var)
-- **CSS Fix**: Root `tailwind.config.js` content paths fixed to point at `./client/src/**`. A `client/postcss.config.js` was added so Vite middleware mode picks up PostCSS/Tailwind correctly.
-- **HMR Warning**: WebSocket HMR connection shows a warning in the browser console due to Replit's proxy — this is normal and does not affect app functionality.
+## Project Overview
+A comprehensive food delivery system supporting three user roles: Customers, Drivers, and Administrators. Built as a full-stack TypeScript application with a React frontend and Express backend.
 
 ## Architecture
-
-### Frontend
-- **Framework**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS + Radix UI components
-- **State Management**: TanStack Query (React Query)
-- **Routing**: Wouter
-- **Icons**: Lucide React
-
-### Backend
-- **Server**: Node.js + Express (TypeScript)
-- **Runtime**: tsx for development
-- **WebSockets**: ws library for real-time updates
-
-### Database
-- **Database**: PostgreSQL (Replit built-in)
-- **ORM**: Drizzle ORM
-- **Schema**: `shared/schema.ts`
-- **Migrations**: `drizzle/` directory
+- **Frontend**: React 18 + Vite, Tailwind CSS, Radix UI, TanStack Query, Wouter routing
+- **Backend**: Node.js + Express, Drizzle ORM, PostgreSQL, WebSockets (ws), Passport.js auth
+- **Database**: PostgreSQL (Replit managed), Drizzle ORM schema in `/shared/schema.ts`
+- **Package Manager**: npm
+- **Build Tool**: Vite (frontend) + esbuild (backend)
 
 ## Project Structure
+- `/client` - React frontend application
+  - `/src/pages` - Pages organized by role: admin, driver, customer
+  - `/src/components` - Reusable UI components (Shadcn UI based)
+  - `/src/context` - React Context providers (Auth, Cart, Location, Theme)
+- `/server` - Express backend
+  - `index.ts` - Entry point
+  - `db.ts` - DatabaseStorage class (Drizzle ORM)
+  - `storage.ts` - IStorage interface + MemStorage fallback
+  - `routes/` - Modular API routes (admin, driver, orders, etc.)
+  - `viteServer.ts` - Vite dev server integration
+  - `seed.ts` - Default data seeding
+- `/shared` - Shared code (Drizzle schema, types)
+- `/drizzle` - Migration files
 
-```
-/
-├── client/          # React frontend
-│   └── src/
-│       ├── components/  # UI components (Radix-based)
-│       ├── context/     # React Context providers
-│       ├── contexts/    # Additional contexts
-│       ├── hooks/       # Custom hooks
-│       ├── pages/       # App pages (customer, admin, driver)
-│       ├── services/    # API service layer
-│       └── utils/       # Utility functions
-├── server/          # Express backend
-│   ├── routes/      # API endpoints
-│   ├── services/    # Business logic
-│   ├── db.ts        # DatabaseStorage implementation
-│   ├── storage.ts   # Storage interface + MemStorage
-│   ├── seed.ts      # Database seeding
-│   ├── socket.ts    # WebSocket setup
-│   └── viteServer.ts # Vite dev middleware
-├── shared/          # Shared TypeScript types and schema
-│   └── schema.ts    # Drizzle schema (single source of truth)
-├── drizzle/         # DB migrations
-└── drizzle.config.ts
-```
+## Driver App Audit Fixes (Session 2)
+- **EnhancedDriverDashboard.tsx**: CRITICAL fix — replaced broken `WS_MANAGER` polling with a dedicated WebSocket connection for the driver app (independent of customer WS). Driver now correctly authenticates and receives real-time notifications
+- **EnhancedDriverDashboard.tsx**: Removed `activeTab` from WebSocket `useEffect` dependency array (was causing WS reconnect on every tab switch). Used `activeTabRef` pattern instead to avoid stale closures
+- **EnhancedDriverDashboard.tsx**: Added `driverWsRef` to share WS reference with geolocation effect (for location update sends)
+- **ProfilePage.tsx**: Now fetches fresh profile data from `/api/drivers/app/dashboard` server endpoint (was only reading stale localStorage data set at login time)
+- **CustomerAuthPage.tsx**: Implemented real Google Sign-In using Google Identity Services (GIS) SDK. When `VITE_GOOGLE_CLIENT_ID` env var is set, renders Google's official button and decodes real JWT to get `sub`, `email`, `name`. Falls back to clear error if unconfigured. Apple login keeps existing flow.
+
+## Google Sign-In Setup (To Activate)
+1. Create a project in Google Cloud Console and enable "Google Identity" API
+2. Create OAuth 2.0 credentials (Web application type)
+3. Add your Replit app URL to authorized origins
+4. Set `VITE_GOOGLE_CLIENT_ID` environment variable with your client ID
+5. The Google Sign-In button in `/auth` will automatically activate
+
+## Recent Fixes Applied (Comprehensive Audit)
+- Fixed `eq import` error in `server/index.ts` scheduled orders timer
+- Fixed admin/driver login routing in `AuthContext.tsx` and `LoginPage.tsx`
+- **Cart.tsx**: Fixed post-order redirect from broken `/order-tracking/:id` → correct `/orders/:id`
+- **App.tsx**: Added missing routes: `/favorites` (Favorites), `/wasalni` (WasalniPage), `/category/:name` (CategoryPage)
+- **OrderTracking.tsx**: Added WebSocket auth messages (userId + customerPhone), added auto-reconnect, added working cancel order button via `PATCH /api/orders/:id/cancel`
+- **CustomerAuthPage.tsx**: Fixed social login using wrong localStorage key (`token` → `auth_token`)
+- **auth.ts**: Added `isActive` field to `/api/auth/validate` response; added isActive check to block inactive users
+- **admin.ts**: Added targeted `sendToUser` + `sendToDriver` calls in `PUT /api/admin/orders/:id/status` in addition to broadcast, ensuring customer gets direct WS notification when driver is assigned
+- **NotificationContext.tsx**: Now listens for both `order_update` AND `order_status_changed` WS types; sends auth for both user.id and customer_phone; added Arabic status labels for notifications
+- **socket.ts**: Fixed missing `isAlive` field in client entries on auth
+
+## Key Auth Pattern
+- Customer auth token stored as `auth_token` in localStorage = user UUID
+- Admin: `admin_token`, Driver: `driver_token`
+- Customer phone stored in `customer_phone` localStorage key
+- WS auth sends both userId (UUID) and phone to cover all targeting patterns
+
+## Driver Earnings Bug Fix (Critical)
+**Bug**: Driver wallet balance was being doubled on order completion (e.g., 3000 earned → 6000 added).
+**Root Cause**: In `server/db.ts` `completeOrder()`, both `updateDriverBalance()` AND `createDriverCommission()` (which internally calls `createDriverTransaction()` which calls `updateDriverBalance()` again) were called for the same amount.
+**Fix Applied**:
+1. `completeOrder()` (db.ts): Removed direct `updateDriverBalance()` call - now only `createDriverCommission()` handles the balance update chain
+2. `add-balance` route (advanced.ts): Removed extra `updateDriverBalance()` call - now only `createDriverTransaction()` updates the balance  
+3. Withdrawal approval route (advanced.ts): Same fix - removed duplicate `updateDriverBalance()` call
+
+## Restaurant Financial Statement
+- **API**: `GET /api/restaurant-accounts/:restaurantId/statement?from=&to=` - returns detailed order-by-order breakdown with commission, net earnings, and withdrawal history
+- **UI Page**: `client/src/pages/admin/RestaurantStatementPage.tsx` - full-featured statement with period filter, summary cards, detailed order table, withdrawal history, print, and PDF download (jsPDF + autoTable)
+- **Navigation**: Added "تقرير PDF" button in `AdminRestaurantAccounts.tsx` next to each restaurant
+- **Route**: `/admin/restaurant-accounts/:restaurantId/statement`
+
+## Real-time Dashboard Updates
+- Admin Dashboard (`AdminDashboard.tsx`): Added WebSocket listener for instant invalidation on order/notification events, reduced polling to 15 seconds
+- Driver Dashboard: Already had WebSocket + added wasalni query invalidation
+- Customer Notifications Panel: Added WebSocket for real-time notification refresh
+- Added GPS location auto-fill (Nominatim reverse geocoding) to WasalniPage steps 1 & 2
+- Added conditional coupon field in CartPage based on `coupon_min_order_value` setting
+- Added `coupon_min_order_value` to seed.ts and AdminUiSettings admin panel
+- Removed hard location requirement from cart checkout button (order can be placed without GPS)
+- Fixed React invalid hook call and setState-in-render warning in App.tsx
 
 ## Development
+- **Dev command**: `npm run dev` (runs Express + Vite middleware on port 5000)
+- **Build command**: `npm run build`
+- **DB push**: `npm run db:push`
 
-### Running the App
-```bash
-npm run dev
-```
-The server starts on port 5000, serving both the Express API and Vite dev server via middleware.
-
-### Database Setup
-```bash
-npm run db:push   # Push schema changes to database
-npm run db:setup  # Run setup script
-```
-
-### Build for Production
-```bash
-npm run build     # Build both client and server
-npm start         # Run production server
-```
-
-## Key Configuration
-
-- **Port**: 5000 (both dev server and API)
-- **Storage**: `USE_MEMORY_STORAGE = false` in `server/storage.ts` — uses PostgreSQL
-- **Vite Config**: Root `vite.config.ts` serves client from `client/` directory
-- **Host**: `0.0.0.0` for dev server (Replit proxy compatibility)
-- **AllowedHosts**: `true` (bypasses host header check for Replit proxy)
+## Key Features
+- Customer app: Browse restaurants/categories, place orders, order tracking
+- Driver app: Manage deliveries, earnings, wallet
+- Admin panel: Orders management, drivers, financial reports, system settings
+- Real-time updates via WebSockets
+- PWA support with service worker
+- Scheduled orders with auto-activation timer
+- Hidden 4-click admin access (tap logo)
+- **AppClosedOverlay**: Interactive popup when store is closed, allows scheduling orders with date/time picker
+- **Wasalni Service (وصل لي)**: Full delivery-from-anywhere service
+  - Customer page: `/wasalni` with from/to address, order type, scheduled time, notes, invoice view
+  - Admin page: `/admin/wasalni` with request management, status updates, fee setting
+  - DB table: `wasalni_requests` (schema in `/shared/schema.ts`)
+  - API: `/api/wasalni` (CRUD in `server/routes/wasalni.ts`)
+  - Toggle: `show_wasalni_service` UI setting in admin panel
+- **Notifications fix**: Customer notifications now correctly fetched from server
+- **Scheduled orders bypass closure**: Scheduled orders allowed even when store is closed
 
 ## Environment Variables
-- `DATABASE_URL` - PostgreSQL connection string (auto-set by Replit)
-- `NODE_ENV` - development/production
+- `DATABASE_URL` - PostgreSQL connection (managed by Replit)
+- `SESSION_SECRET` - Session encryption key (managed by Replit)
+- `NODE_ENV` - Set to "development" for dev mode
 
-## User Types
-1. **Customers** - Browse restaurants, place orders, track delivery
-2. **Drivers** - Accept/manage deliveries, track earnings
-3. **Admins** - Full platform management (restaurants, menus, drivers, analytics)
+## Deployment
+- Target: autoscale
+- Build: `npm run build`
+- Run: `node dist/index.js`
 
-## Authentication
-
-### Admin Panel
-- Protected route: accessing `/admin` redirects to `/admin-login` if no token
-- Auth endpoint: `POST /api/auth/admin/login` (email + password)
-- Validation: **bcrypt only** — passwords verified against hashed DB values (no bypass)
-- Token stored in `localStorage` as `admin_token` (uses admin UUID as token)
-- Logout clears token and redirects to `/admin-login`
-
-### Driver App
-- Protected: accessing `/driver` redirects to `/driver-login` if no token
-- Auth endpoint: `POST /api/auth/driver/login` (phone + password)
-- Token stored in `localStorage` as `driver_token`
-
-### Default Credentials (Seeded)
-- **Admin**: admin@alsarie-one.com / 777146387
-- **Admin 2**: manager@alsarie-one.com / manager123
-- **Driver 1**: +967771234567 / 123456
-- **Driver 2**: +967779876543 / 123456
-
-## UI Settings System
-Admin can control both customer and driver app interfaces from the admin panel at `/admin/ui-settings`:
-- **Customer App**: Show/hide pages (orders, tracking, search, categories, hero section, etc.), branding, support, privacy
-- **Driver App**: Show/hide wallet page, stats page, profile page, history page
-- Settings are stored in the `ui_settings` table and fetched via `/api/admin/ui-settings`
-- Both apps use `UiSettingsContext` to apply settings in real-time
-
-## Default Seed Data
-On first run with a fresh database, the app seeds:
-- 5 categories (vegetables, fruits, dates, etc.)
-- 3 restaurants
-- 4 menu items
-- 19 UI settings
-- 2 admin users
-- 2 drivers
-
-## Drivers Schema — Extended Fields
-The `drivers` table has these important fields:
-- `paymentMode`: 'commission' | 'salary' — how driver is paid
-- `commissionRate`: percentage of delivery fee (when paymentMode='commission')
-- `salaryAmount`: monthly salary amount (when paymentMode='salary')
-- `allowProfileEdit`: boolean — admin controls if driver can edit their own profile
-- `notes`: admin notes about the driver
-- `joinDate`: when the driver joined
-
-## Admin Panel Features
-- **إدارة السائقين**: 4-tab account dialog (بيانات السائق, المحفظة, المعاملات, العمولات)
-- **الأقسام**: Search bar (sticky) added
-- **العروض الخاصة**: No restaurant association required (global store offers)
-- **Currency**: SAR everywhere (ر.س) — locale: ar-SA
-
-## Recent Improvements (March 2026)
-
-### Bug Fixes
-- **Fixed missing admin routes**: Added `/admin/coupons`, `/admin/payment-methods`, `/admin/detailed-reports` routes to AdminApp.tsx
-- **Fixed AdminLayout wrapping**: AdminApp now wraps all routes with `<AdminLayout>` at the top level
-- **Fixed input focus issue in AdminUiSettings**: Created `StableTextInput` and `StableTextarea` components outside the main component to prevent React remounting on every state change (inputs no longer lose focus while typing)
-- **Fixed sidebar scroll preservation**: Added sessionStorage-based scroll position save/restore in AdminLayout.tsx using `useRef` and `useEffect`
-
-### New Features
-- **Sub-admins management moved to HR Management**: Sub-admins tab added to AdminHRManagement.tsx with full CRUD (create/edit/delete sub-admins, assign granular permissions)
-- **AdminProfile simplified**: Now shows only profile info + password change. Added hint to manage sub-admins via HR Management
-- **Security logging**: Login events are now logged to `audit_logs` table (entityType='auth'). Logout events logged via `POST /api/admin/security/log-logout`. Security page at `/admin/security` now displays real login/logout history
-- **Security API routes**: Added `GET /api/admin/security/logs`, `POST /api/admin/security/log-login`, `POST /api/admin/security/log-logout`, `GET /api/admin/security/settings`
-- **Sticky header in AdminLayout**: Desktop and mobile headers are now sticky (top-0 with z-30)
-- **Improved sidebar**: Clean grouping of nav items (Main, Store, Drivers, Reports, Management, Settings), notifications bell with badge, user avatar display
+## Latest Session Fixes (April 2026)
+- **Targeted notifications (server/socket.ts)**: New `notifyOrder(type, payload, recipients)` helper sends WebSocket events only to the specific customer (by id and phone), assigned driver, admin dashboard, and active order trackers. Replaced all global `ws.broadcast('order_update', ...)` calls in `server/routes/orders.ts`, `server/routes/wasalni.ts`, `server/routes/driver.ts`, and one in `server/routes/admin.ts` with `ws.notifyOrder(...)` so each customer only receives their own order updates.
+- **TopBar working hours indicator**: Replaced the "deliver to current location" mobile button with a `WorkingHoursIndicator` (`client/src/components/TopBar.tsx`) that reads `store_status`, `opening_time`, `closing_time` from `useUiSettings`, computes open/closed automatically (supports midnight crossover), and shows time in 12-hour format with Arabic ص/م suffix. Auto-refreshes every minute.
+- **AdminOffers.tsx**: Converted misused `useState(() => {...})` to `useEffect`. Added `onError` toasts and proper `response.ok` checks to all three mutations (create / update / delete). Switched `validUntil` to ISO string for safer JSON serialization. Verified end-to-end with `POST /api/admin/special-offers` returning 201 with auto-linked "العروض" category.
+- **Admin sidebar cleanup (AdminLayout.tsx)**: Removed three menu items whose routes had no page (would render NotFound): "تقارير المتاجر" (`/admin/restaurant-reports`), "التقارير التفصيلية" (`/admin/detailed-reports`), "التقارير المتقدمة" (`/admin/advanced-reports`).
+- **Google Sign-In secret**: Requested `VITE_GOOGLE_CLIENT_ID` from the user (the GIS button code in `CustomerAuthPage.tsx` was already complete from a previous session and activates as soon as the env var is set).

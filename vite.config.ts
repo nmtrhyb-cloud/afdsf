@@ -31,25 +31,20 @@ export default defineConfig(async () => {
     build: {
       outDir: path.resolve(__dirname, "dist/public"),
       emptyOutDir: true,
-      rollupOptions: {
-        output: {
-          manualChunks(id: string) {
-            if (id.includes('node_modules')) {
-              return id.toString().split('node_modules/')[1].split('/')[0].toString();
-            }
-          }
-        },
-      },
-      chunkSizeWarningLimit: 1000,  // Increase limit to reduce unnecessary warnings
+      // تعطيل manualChunks تماماً - هذا هو الحل الأضمن
+      chunkSizeWarningLimit: 1500,
     },
     server: {
       host: "0.0.0.0",
       port: 5000,
       strictPort: false,
       allowedHosts: true,
-      hmr: {
-        clientPort: 443,
-      },
+      hmr: process.env.REPL_ID
+        ? {
+            clientPort: 443,
+            protocol: 'wss',
+          }
+        : true,
       fs: {
         strict: false,
       },
