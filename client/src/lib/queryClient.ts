@@ -71,10 +71,16 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
-      refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      refetchInterval: 15000, // Increased interval to 15 seconds to reduce noise
+      refetchOnWindowFocus: true,
+      staleTime: 5000,
+      retry: (failureCount, error: any) => {
+        // Only retry if it's not a 401, 403 or 500 error
+        if (error?.message?.includes('401') || error?.message?.includes('403') || error?.message?.includes('500')) {
+          return false;
+        }
+        return failureCount < 2;
+      },
     },
     mutations: {
       retry: false,
