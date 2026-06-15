@@ -46,8 +46,9 @@ export default defineConfig(async () => {
       host: "0.0.0.0",
       port: 5000,
       strictPort: false,
+      allowedHosts: true,
       hmr: {
-        port: 5000,
+        clientPort: 443,
       },
       fs: {
         strict: false,
