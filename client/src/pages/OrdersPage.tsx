@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { ArrowRight, Package, Clock, CheckCircle, XCircle, Eye, Loader, Star, Phone, MessageSquare } from 'lucide-react';
+import { ArrowRight, Package, Clock, CheckCircle, XCircle, Eye, Loader, Star, Phone, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +20,7 @@ interface Order {
   deliveryAddress: string;
   notes?: string;
   paymentMethod: string;
-  items: string; // JSON string from database
+  items: string;
   subtotal: string;
   deliveryFee: string;
   total: string;
@@ -31,13 +31,14 @@ interface Order {
   driverName?: string;
   driverPhone?: string;
   isRated?: boolean;
-  status: 'pending' | 'confirmed' | 'preparing' | 'on_way' | 'delivered' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'preparing' | 'on_way' | 'delivered' | 'cancelled' | 'scheduled';
   createdAt: string;
   updatedAt: string;
   estimatedTime?: string;
   driverEarnings: string;
   customerId?: string;
-  parsedItems?: OrderItem[]; // Add this for processed orders
+  parsedItems?: OrderItem[];
+  _isWasalni?: boolean;
 }
 
 interface OrderItem {
@@ -49,100 +50,263 @@ interface OrderItem {
   restaurantName?: string;
 }
 
+const CANCEL_REASONS = [
+  'غيّرت رأيي',
+  'طلبت بالخطأ',
+  'تأخر وقت التوصيل',
+  'لا يوجد سائق متاح',
+  'مشكلة في الدفع',
+  'سبب آخر',
+];
+
 export default function OrdersPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [selectedTab, setSelectedTab] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
   const [showRatingDialog, setShowRatingDialog] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-  // Get customer info from user context or localStorage as fallback
+  // نافذة إلغاء الطلب
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [customCancelReason, setCustomCancelReason] = useState('');
+
   const customerPhone = user?.phone || localStorage.getItem('customer_phone');
 
-  // Fetch orders from database using phone number
   const { data: orders = [], isLoading, error } = useQuery<Order[]>({
     queryKey: ['orders', customerPhone],
     enabled: !!customerPhone,
     queryFn: async () => {
-      const response = await fetch(`/api/orders/customer/${customerPhone}`);
-      if (!response.ok) {
+      const [ordersRes, wasalniRes] = await Promise.all([
+        fetch(`/api/orders/customer/${customerPhone}`),
+        fetch(`/api/wasalni?phone=${encodeURIComponent(customerPhone || '')}`),
+      ]);
+      if (!ordersRes.ok) {
         throw new Error('فشل في جلب الطلبات');
       }
-      const data = await response.json();
-      
-      // Process each order to parse items and fetch restaurant name
-      const processedOrders = data.map((order: Order) => {
+      const data: Order[] = await ordersRes.json();
+
+      const foodOrders: Order[] = data.map((order: Order) => {
         let parsedItems: OrderItem[] = [];
         try {
-          parsedItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+          parsedItems = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items as any);
         } catch (e) {
           console.error('خطأ في تحليل عناصر الطلب:', e);
         }
-        
-        // Try to get restaurant name from order if available (from backend join)
+
         let restaurantName = order.restaurantName;
         if (!restaurantName && parsedItems.length > 0 && parsedItems[0].restaurantName) {
           restaurantName = parsedItems[0].restaurantName;
         } else if (!restaurantName) {
           restaurantName = 'مطعم غير معروف';
         }
-        
-        return {
-          ...order,
-          restaurantName,
-          parsedItems
-        };
+
+        return { ...order, restaurantName, parsedItems };
       });
-      
-      return processedOrders;
+
+      // دمج طلبات وصل لي
+      let wasalniOrders: Order[] = [];
+      if (wasalniRes.ok) {
+        try {
+          const wasalniData: any[] = await wasalniRes.json();
+          // الخادم يقوم بالفعل بفلترة الطلبات حسب الهاتف بطريقة مُطبَّعة
+          // (إزالة المسافات + trim)، لذلك لا حاجة لفلترة صارمة هنا قد تخفي طلبات صحيحة
+          wasalniOrders = (wasalniData || [])
+            .map((w) => ({
+              id: w.id,
+              orderNumber: w.requestNumber,
+              customerName: w.customerName,
+              customerPhone: w.customerPhone,
+              deliveryAddress: w.toAddress,
+              notes: w.notes || '',
+              paymentMethod: 'cash',
+              items: '[]',
+              subtotal: w.estimatedFee || '0',
+              deliveryFee: w.estimatedFee || '0',
+              total: w.estimatedFee || '0',
+              totalAmount: w.estimatedFee || '0',
+              restaurantId: '',
+              restaurantName: `وصل لي - ${w.orderType || 'توصيل'}`,
+              status: w.status,
+              createdAt: w.createdAt,
+              updatedAt: w.updatedAt,
+              driverEarnings: '0',
+              _isWasalni: true,
+              parsedItems: [
+                { name: `من: ${w.fromAddress}`, quantity: 1, price: 0 },
+                { name: `إلى: ${w.toAddress}`, quantity: 1, price: 0 },
+              ],
+            } as Order));
+        } catch (e) {
+          console.error('خطأ في تحميل طلبات وصل لي:', e);
+        }
+      }
+
+      const merged = [...foodOrders, ...wasalniOrders];
+      merged.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      return merged;
     },
+    refetchInterval: 8000,
     retry: 1
   });
 
-  // Use database orders if available, otherwise use an empty array
-  // (removed fallbackOrders to show real data status)
-  const displayOrders = orders;
+  // اشتراك WebSocket لتلقي تحديثات الطلبات الفورية من السائق والإدارة
+  useEffect(() => {
+    if (!customerPhone) return;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const connect = () => {
+      if (cancelled) return;
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+        ws.onopen = () => {
+          // إرسال auth بكلا المعرّفين (customerId والهاتف) لضمان وصول إشعارات
+          // الطلبات بصرف النظر عن المعرّف الذي خزّنه الخادم في recipientId
+          const customerId = user?.id;
+          if (customerId) {
+            ws?.send(JSON.stringify({
+              type: 'auth',
+              payload: { userId: customerId, userType: 'customer' },
+            }));
+          }
+          if (customerPhone && customerPhone !== customerId) {
+            ws?.send(JSON.stringify({
+              type: 'auth',
+              payload: { userId: customerPhone, userType: 'customer' },
+            }));
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (
+              message.type === 'order_update' ||
+              message.type === 'order_status_changed' ||
+              message.type === 'new_wasalni_request' ||
+              message.type === 'driver_assigned'
+            ) {
+              queryClient.invalidateQueries({ queryKey: ['orders', customerPhone] });
+            }
+          } catch (err) {
+            console.error('Failed to parse WS message in OrdersPage:', err);
+          }
+        };
+
+        ws.onclose = () => {
+          if (!cancelled) {
+            reconnectTimeout = setTimeout(connect, 2000);
+          }
+        };
+        ws.onerror = () => {
+          try { ws?.close(); } catch {}
+        };
+      } catch (err) {
+        console.error('WebSocket connection failed:', err);
+      }
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      try { ws?.close(); } catch {}
+    };
+  }, [customerPhone, queryClient]);
+
+  // طلب الإلغاء
+  const cancelOrderMutation = useMutation({
+    mutationFn: async ({ orderId, reason, isWasalni }: { orderId: string; reason: string; isWasalni?: boolean }) => {
+      const url = isWasalni ? `/api/wasalni/${orderId}` : `/api/orders/${orderId}`;
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled', cancelReason: reason, updatedBy: customerPhone, updatedByType: 'customer' }),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'فشل في إلغاء الطلب');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders', customerPhone] });
+      toast({
+        title: "تم إلغاء الطلب",
+        description: "تم إلغاء طلبك بنجاح",
+      });
+      setShowCancelDialog(false);
+      setCancellingOrder(null);
+      setCancelReason('');
+      setCustomCancelReason('');
+    },
+    onError: (err: any) => {
+      toast({
+        title: "خطأ في الإلغاء",
+        description: err.message || "حدث خطأ، يرجى المحاولة مرة أخرى",
+        variant: "destructive",
+      });
+    }
+  });
 
   const getStatusLabel = (status: string) => {
-    const statusMap = {
+    const statusMap: Record<string, string> = {
       pending: 'قيد المراجعة',
       confirmed: 'مؤكد',
       preparing: 'قيد التحضير',
       on_way: 'في الطريق',
       delivered: 'تم التوصيل',
-      cancelled: 'ملغي'
+      cancelled: 'ملغي',
+      scheduled: 'مجدول',
     };
-    return statusMap[status as keyof typeof statusMap] || status;
+    return statusMap[status] || status;
   };
 
   const getStatusColor = (status: string) => {
-    const colorMap = {
+    const colorMap: Record<string, string> = {
       pending: 'bg-yellow-500',
       confirmed: 'bg-blue-500',
       preparing: 'bg-orange-500',
       on_way: 'bg-purple-500',
       delivered: 'bg-green-500',
-      cancelled: 'bg-red-500'
+      cancelled: 'bg-red-500',
+      scheduled: 'bg-teal-500',
     };
-    return colorMap[status as keyof typeof colorMap] || 'bg-gray-500';
+    return colorMap[status] || 'bg-gray-500';
   };
 
   const getStatusIcon = (status: string) => {
-    const iconMap = {
+    const iconMap: Record<string, any> = {
       pending: Clock,
       confirmed: Package,
       preparing: Package,
       on_way: Package,
       delivered: CheckCircle,
-      cancelled: XCircle
+      cancelled: XCircle,
+      scheduled: Clock,
     };
-    return iconMap[status as keyof typeof iconMap] || Clock;
+    return iconMap[status] || Clock;
   };
+
+  // هل يمكن إلغاء الطلب؟ فقط في حالات معينة
+  const canCancelOrder = (status: string) => {
+    return ['pending', 'confirmed', 'preparing', 'scheduled'].includes(status);
+  };
+
+  const displayOrders = orders;
 
   const filteredOrders = displayOrders.filter(order => {
     if (selectedTab === 'all') return true;
-    if (selectedTab === 'active') return ['pending', 'confirmed', 'preparing', 'on_way'].includes(order.status);
+    if (selectedTab === 'active') return ['pending', 'confirmed', 'preparing', 'on_way', 'scheduled'].includes(order.status);
     if (selectedTab === 'completed') return order.status === 'delivered';
     if (selectedTab === 'cancelled') return order.status === 'cancelled';
     return true;
@@ -164,14 +328,30 @@ export default function OrdersPage() {
     });
   };
 
+  const openCancelDialog = (order: Order) => {
+    setCancellingOrder(order);
+    setCancelReason('');
+    setCustomCancelReason('');
+    setShowCancelDialog(true);
+  };
+
+  const handleConfirmCancel = () => {
+    if (!cancellingOrder) return;
+    const finalReason = cancelReason === 'سبب آخر' ? customCancelReason.trim() : cancelReason;
+    if (!finalReason) {
+      toast({ title: "الرجاء اختيار سبب الإلغاء", variant: "destructive" });
+      return;
+    }
+    cancelOrderMutation.mutate({ orderId: cancellingOrder.id, reason: finalReason, isWasalni: cancellingOrder._isWasalni });
+  };
+
   const tabs = [
     { id: 'all', label: 'جميع الطلبات', count: displayOrders.length },
-    { id: 'active', label: 'النشطة', count: displayOrders.filter(o => ['pending', 'confirmed', 'preparing', 'on_way'].includes(o.status)).length },
+    { id: 'active', label: 'النشطة', count: displayOrders.filter(o => ['pending', 'confirmed', 'preparing', 'on_way', 'scheduled'].includes(o.status)).length },
     { id: 'completed', label: 'المكتملة', count: displayOrders.filter(o => o.status === 'delivered').length },
     { id: 'cancelled', label: 'الملغية', count: displayOrders.filter(o => o.status === 'cancelled').length }
   ];
 
-  // Show loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -183,7 +363,6 @@ export default function OrdersPage() {
     );
   }
 
-  // Show error state
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -200,7 +379,7 @@ export default function OrdersPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+      {/* رأس الصفحة */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-md mx-auto px-4 py-4">
           <div className="flex items-center gap-3">
@@ -220,7 +399,7 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* التبويبات */}
       <div className="max-w-md mx-auto p-4">
         <Tabs value={selectedTab} onValueChange={(value) => setSelectedTab(value as any)}>
           <TabsList className="grid w-full grid-cols-4 mb-6">
@@ -276,7 +455,7 @@ export default function OrdersPage() {
                     </CardHeader>
                     
                     <CardContent className="space-y-4">
-                      {/* Order Items */}
+                      {/* عناصر الطلب */}
                       <div className="space-y-2">
                         {order.parsedItems?.map((item: OrderItem, index: number) => (
                           <div key={index} className="flex justify-between text-sm">
@@ -284,13 +463,11 @@ export default function OrdersPage() {
                             <span className="font-medium">{formatCurrency(item.price)}</span>
                           </div>
                         )) || (
-                          <div className="text-sm text-gray-500">
-                            لا توجد تفاصيل العناصر
-                          </div>
+                          <div className="text-sm text-gray-500">لا توجد تفاصيل العناصر</div>
                         )}
                       </div>
 
-                      {/* Order Summary */}
+                      {/* ملخص الطلب */}
                       <div className="border-t pt-3 space-y-2">
                         <div className="flex justify-between text-sm text-gray-600">
                           <span>عدد الأصناف: {order.parsedItems?.reduce((sum: number, item: OrderItem) => sum + item.quantity, 0) || 0}</span>
@@ -308,7 +485,7 @@ export default function OrdersPage() {
                         </div>
                       </div>
 
-                      {/* Action Buttons */}
+                      {/* أزرار الإجراءات */}
                       <div className="flex flex-wrap gap-2 pt-2">
                         <Button
                           variant="outline"
@@ -320,6 +497,20 @@ export default function OrdersPage() {
                           <Eye className="w-4 h-4 mr-1" />
                           تتبع الطلب
                         </Button>
+
+                        {/* زر الإلغاء - يظهر للطلبات النشطة القابلة للإلغاء */}
+                        {canCancelOrder(order.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 border-red-300 text-red-600 hover:bg-red-50"
+                            onClick={() => openCancelDialog(order)}
+                            data-testid={`button-cancel-order-${order.id}`}
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            إلغاء الطلب
+                          </Button>
+                        )}
                         
                         {order.status === 'delivered' && !order.isRated && (
                           <Button
@@ -341,7 +532,7 @@ export default function OrdersPage() {
                             onClick={() => window.location.href = `tel:${order.driverPhone}`}
                           >
                             <Phone className="w-4 h-4 mr-1" />
-                            اتصال
+                            اتصال بالسائق
                           </Button>
                         )}
                         
@@ -375,9 +566,92 @@ export default function OrdersPage() {
             orderId={selectedOrder.id}
             restaurantName={selectedOrder.restaurantName || "المطعم"}
             driverName={selectedOrder.driverName}
+            customerId={selectedOrder.customerId || user?.id}
           />
         )}
       </div>
+
+      {/* نافذة إلغاء الطلب */}
+      {showCancelDialog && cancellingOrder && (
+        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            {/* رأس النافذة */}
+            <div className="bg-red-500 px-5 py-4 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <XCircle className="h-5 w-5" />
+                  <h3 className="font-black text-lg">إلغاء الطلب</h3>
+                </div>
+                <button
+                  onClick={() => setShowCancelDialog(false)}
+                  className="text-white/80 hover:text-white"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="text-white/80 text-sm mt-1">
+                طلب رقم: {cancellingOrder.orderNumber}
+              </p>
+            </div>
+
+            {/* المحتوى */}
+            <div className="px-5 py-4">
+              <p className="text-gray-700 font-bold text-sm mb-4">
+                يرجى اختيار سبب الإلغاء:
+              </p>
+
+              <div className="space-y-2 mb-4">
+                {CANCEL_REASONS.map((reason) => (
+                  <button
+                    key={reason}
+                    onClick={() => setCancelReason(reason)}
+                    className={`w-full text-right px-4 py-3 rounded-xl border-2 transition-all text-sm font-bold ${
+                      cancelReason === reason
+                        ? 'border-red-500 bg-red-50 text-red-700'
+                        : 'border-gray-100 hover:border-gray-300 text-gray-700'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              {cancelReason === 'سبب آخر' && (
+                <textarea
+                  placeholder="اكتب سبب الإلغاء..."
+                  value={customCancelReason}
+                  onChange={(e) => setCustomCancelReason(e.target.value)}
+                  className="w-full p-3 border-2 rounded-xl text-sm focus:border-red-400 outline-none resize-none mb-4"
+                  rows={3}
+                />
+              )}
+
+              <div className="flex gap-3">
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={handleConfirmCancel}
+                  disabled={cancelOrderMutation.isPending || !cancelReason || (cancelReason === 'سبب آخر' && !customCancelReason.trim())}
+                >
+                  {cancelOrderMutation.isPending ? (
+                    <Loader className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'تأكيد الإلغاء'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowCancelDialog(false)}
+                  disabled={cancelOrderMutation.isPending}
+                >
+                  رجوع
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

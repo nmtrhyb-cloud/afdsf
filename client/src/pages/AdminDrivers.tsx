@@ -598,7 +598,7 @@ export default function AdminDrivers() {
                     </div>
                   ) : (
                     <div>
-                      <Label htmlFor="salaryAmount">الراتب الشهري (ريال سعودي)</Label>
+                      <Label htmlFor="salaryAmount">الراتب الشهري (ريال يمني)</Label>
                       <Input
                         id="salaryAmount"
                         type="number"
@@ -1494,7 +1494,7 @@ export default function AdminDrivers() {
             <DialogFooter className="sticky bottom-0 bg-background pt-4 border-t">
               <div className="flex items-center justify-between w-full">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>آخر تحديث: {new Date().toLocaleTimeString('ar-SA')}</span>
+                  <span>آخر تحديث: {new Date().toLocaleTimeString('ar-YE')}</span>
                 </div>
                 <div className="flex gap-2">
                   <Button

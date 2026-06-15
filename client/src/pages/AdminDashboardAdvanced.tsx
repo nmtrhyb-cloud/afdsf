@@ -74,7 +74,7 @@ export default function AdminDashboardAdvanced() {
   const metricCards: MetricCard[] = [
     {
       title: 'إجمالي الإيرادات',
-      value: `${platformMetrics?.data?.totalPlatformRevenue || '0'} شيكل`,
+      value: `${platformMetrics?.data?.totalPlatformRevenue || '0'} ريال`,
       change: '+12.5%',
       icon: <DollarSign className="text-green-600" size={24} />,
       color: 'bg-green-50'
@@ -245,7 +245,7 @@ export default function AdminDashboardAdvanced() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-3xl font-bold text-green-600">
-                    {financialData?.data?.today?.totalRevenue || '0'} شيكل
+                    {financialData?.data?.today?.totalRevenue || '0'} ريال
                   </p>
                   <p className="text-sm text-gray-600 mt-2">
                     {financialData?.data?.today?.totalOrders || '0'} طلب
@@ -259,7 +259,7 @@ export default function AdminDashboardAdvanced() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-3xl font-bold text-blue-600">
-                    {financialData?.data?.thisWeek?.totalRevenue || '0'} شيكل
+                    {financialData?.data?.thisWeek?.totalRevenue || '0'} ريال
                   </p>
                   <p className="text-sm text-gray-600 mt-2">
                     {financialData?.data?.thisWeek?.totalOrders || '0'} طلب
@@ -273,7 +273,7 @@ export default function AdminDashboardAdvanced() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-3xl font-bold text-purple-600">
-                    {financialData?.data?.thisMonth?.totalRevenue || '0'} شيكل
+                    {financialData?.data?.thisMonth?.totalRevenue || '0'} ريال
                   </p>
                   <p className="text-sm text-gray-600 mt-2">
                     {financialData?.data?.thisMonth?.totalOrders || '0'} طلب

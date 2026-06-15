@@ -155,7 +155,7 @@ export default function StatsPage({ driverId }: StatsPageProps) {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">متوسط الربح لكل طلب</span>
                   <span className="text-2xl font-bold text-blue-600">
-                    {stats.totalOrders > 0 ? formatCurrency(stats.totalEarnings / stats.totalOrders) : '0 ر.س'}
+                    {stats.totalOrders > 0 ? formatCurrency(stats.totalEarnings / stats.totalOrders) : '0 ريال'}
                   </span>
                 </div>
               </div>
@@ -232,7 +232,7 @@ export default function StatsPage({ driverId }: StatsPageProps) {
                         ))}
                       </div>
                       <span className="text-xs text-gray-500">
-                        {new Date(review.createdAt).toLocaleDateString('ar-SA')}
+                        {new Date(review.createdAt).toLocaleDateString('ar-YE')}
                       </span>
                     </div>
                     {review.comment && (

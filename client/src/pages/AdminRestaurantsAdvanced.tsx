@@ -389,7 +389,7 @@ export default function AdminRestaurantsAdvanced() {
                                 <Badge className="bg-yellow-100 text-yellow-800">معلق</Badge>
                               </TableCell>
                               <TableCell>
-                                {new Date(request.createdAt).toLocaleDateString('ar-SA')}
+                                {new Date(request.createdAt).toLocaleDateString('ar-YE')}
                               </TableCell>
                               <TableCell>
                                 <div className="flex gap-2">
@@ -535,7 +535,7 @@ export default function AdminRestaurantsAdvanced() {
                           <div>
                             <p className="font-medium">{request.amount.toFixed(2)} ريال</p>
                             <p className="text-sm text-muted-foreground">
-                              {new Date(request.createdAt).toLocaleDateString('ar-SA')}
+                              {new Date(request.createdAt).toLocaleDateString('ar-YE')}
                             </p>
                           </div>
                           <Badge className={

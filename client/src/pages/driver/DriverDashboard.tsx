@@ -292,8 +292,53 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ onLogout }) =>
   const { availableOrders = [], currentOrders = [], pendingOrders = [], stats = {} } = dashboardData || {};
 
   return (
-    <div className="flex items-center justify-center h-screen">
-      <RefreshCw className="h-8 w-8 animate-spin text-green-600" />
+    <div className="min-h-screen bg-gray-50" dir="rtl">
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-xl font-bold text-gray-900">لوحة السائق</h1>
+          <button
+            onClick={onLogout}
+            className="text-sm text-red-600 font-bold"
+          >
+            تسجيل الخروج
+          </button>
+        </div>
+
+        {dashboardError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+            <p className="text-red-700 text-sm font-bold">خطأ في تحميل البيانات. يرجى المحاولة مرة أخرى.</p>
+            <button
+              onClick={() => refetchDashboard()}
+              className="mt-2 text-sm text-red-600 underline"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="bg-white rounded-xl p-3 border">
+            <p className="text-xs text-gray-500">الطلبات المتاحة</p>
+            <p className="text-2xl font-black text-blue-600">{availableOrders.length}</p>
+          </div>
+          <div className="bg-white rounded-xl p-3 border">
+            <p className="text-xs text-gray-500">الطلبات الجارية</p>
+            <p className="text-2xl font-black text-orange-600">{currentOrders.length}</p>
+          </div>
+        </div>
+
+        {pendingOrders.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+            <p className="text-yellow-800 font-bold text-sm">
+              لديك {pendingOrders.length} طلب معلق يحتاج مراجعة
+            </p>
+          </div>
+        )}
+
+        <div className="mt-4 text-center">
+          <p className="text-gray-500 text-sm">استخدم لوحة التحكم الكاملة من قائمة السائق</p>
+        </div>
+      </div>
     </div>
   );
 };

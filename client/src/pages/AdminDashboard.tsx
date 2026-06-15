@@ -47,7 +47,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   const stats = [
     { title: 'إجمالي الطلبات', value: '2,345', icon: ShoppingBag, color: 'text-blue-600' },
     { title: 'العملاء النشطين', value: '1,234', icon: Users, color: 'text-green-600' },
-    { title: 'إجمالي المبيعات', value: '₪45,678', icon: DollarSign, color: 'text-orange-600' },
+    { title: 'إجمالي المبيعات', value: '45,678', icon: DollarSign, color: 'text-orange-600' },
     { title: 'السائقين المتاحين', value: '23', icon: Truck, color: 'text-purple-600' },
   ];
 
@@ -269,7 +269,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
                             {order % 2 === 0 ? "مؤكد" : "قيد المراجعة"}
                           </Badge>
                         </div>
-                        <p className="text-sm text-gray-500 mt-2">₪{50 + order * 10} - منذ {order} ساعات</p>
+                        <p className="text-sm text-gray-500 mt-2">{50 + order * 10} - منذ {order} ساعات</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Button variant="outline" size="sm">

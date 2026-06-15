@@ -131,7 +131,7 @@ export default function SearchPage() {
                           key={item.id} 
                           item={item} 
                           restaurantId={item.restaurantId || ''} 
-                          restaurantName="متجر طمطوم"
+                          restaurantName="متجر واصل"
                         />
                       ))}
                     </div>

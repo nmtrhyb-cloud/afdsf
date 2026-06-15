@@ -1,17 +1,28 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, CheckCircle, XCircle, Phone, MapPin, Filter, Navigation, Search, Truck, AlertCircle, Clock, User } from 'lucide-react';
+import { Package, CheckCircle, XCircle, Phone, MapPin, Filter, Navigation, Search, Truck, AlertCircle, Clock, User, Edit, DollarSign, Plus, Minus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type { Order, Driver } from '@shared/schema';
 
+interface EditableItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
 export default function AdminOrders() {
+  const [, setAdminLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -19,6 +30,12 @@ export default function AdminOrders() {
   const [selectedDriver, setSelectedDriver] = useState<Record<string, string>>({});
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+
+  // حالة نافذة تعديل الأسعار
+  const [editPricesOrder, setEditPricesOrder] = useState<Order | null>(null);
+  const [editedItems, setEditedItems] = useState<EditableItem[]>([]);
+  const [editedDeliveryFee, setEditedDeliveryFee] = useState('');
+  const [priceAdjustmentNote, setPriceAdjustmentNote] = useState('');
 
   const { data: orders, isLoading } = useQuery<Order[]>({
     queryKey: statusFilter !== 'all' ? ['/api/orders', statusFilter] : ['/api/orders'],
@@ -38,15 +55,21 @@ export default function AdminOrders() {
     ws.onopen = () => {
       ws.send(JSON.stringify({
         type: 'auth',
-        payload: { userId: 'admin_dashboard' }
+        payload: { userId: 'admin_dashboard', userType: 'admin' }
       }));
     };
 
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'order_update' || message.type === 'driver_assigned') {
+        const liveEvents = [
+          'order_update', 'driver_assigned', 'new_order',
+          'order_status_changed', 'new_wasalni_request', 'NEW_NOTIFICATION',
+          'driver_status_update'
+        ];
+        if (liveEvents.includes(message.type)) {
           queryClient.invalidateQueries({ queryKey: ['/api/orders'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/drivers'] });
         }
       } catch (err) {
         console.error('Failed to parse WS message:', err);
@@ -122,12 +145,77 @@ export default function AdminOrders() {
     }
   });
 
+  const updatePricesMutation = useMutation({
+    mutationFn: async ({ id, items, deliveryFee, subtotal, totalAmount, priceAdjustmentNote }: {
+      id: string;
+      items: EditableItem[];
+      deliveryFee: number;
+      subtotal: number;
+      totalAmount: number;
+      priceAdjustmentNote: string;
+    }) => {
+      const response = await apiRequest('PUT', `/api/orders/${id}/prices`, {
+        items,
+        deliveryFee,
+        subtotal,
+        totalAmount,
+        priceAdjustmentNote
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/orders'] });
+      toast({
+        title: "✅ تم تعديل الأسعار",
+        description: "تم تحديث أسعار الطلب بنجاح",
+      });
+      setEditPricesOrder(null);
+    },
+    onError: () => {
+      toast({
+        title: "❌ خطأ",
+        description: "فشل تعديل أسعار الطلب",
+        variant: "destructive"
+      });
+    }
+  });
+
   const getOrderItems = (itemsString: string) => {
     try {
       return JSON.parse(itemsString);
     } catch {
       return [];
     }
+  };
+
+  const openEditPrices = (order: Order) => {
+    const items = getOrderItems(order.items);
+    setEditedItems(items.map((item: any) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: parseFloat(item.price)
+    })));
+    setEditedDeliveryFee(order.deliveryFee?.toString() || '0');
+    setPriceAdjustmentNote('');
+    setEditPricesOrder(order);
+  };
+
+  const calcSubtotal = () => editedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const calcTotal = () => calcSubtotal() + parseFloat(editedDeliveryFee || '0');
+
+  const handleSavePrices = () => {
+    if (!editPricesOrder) return;
+    const subtotal = calcSubtotal();
+    const deliveryFee = parseFloat(editedDeliveryFee || '0');
+    const totalAmount = subtotal + deliveryFee;
+    updatePricesMutation.mutate({
+      id: editPricesOrder.id,
+      items: editedItems,
+      deliveryFee,
+      subtotal,
+      totalAmount,
+      priceAdjustmentNote
+    });
   };
 
   const getStatusBadge = (status: string) => {
@@ -164,6 +252,49 @@ export default function AdminOrders() {
     return labels[currentStatus as keyof typeof labels];
   };
 
+  // دالة لحساب المسافة بالكم بين نقطتين
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // نصف قطر الأرض بالكم
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  const getNearestDriver = (order: Order) => {
+    if (!drivers || drivers.length === 0 || !order.restaurantLatitude || !order.restaurantLongitude) return null;
+    
+    const availableDrivers = drivers.filter(d => d.isAvailable && d.latitude && d.longitude);
+    if (availableDrivers.length === 0) return null;
+
+    let nearest = availableDrivers[0];
+    let minDistance = calculateDistance(
+      parseFloat(order.restaurantLatitude), 
+      parseFloat(order.restaurantLongitude),
+      parseFloat(nearest.latitude!),
+      parseFloat(nearest.longitude!)
+    );
+
+    availableDrivers.forEach(driver => {
+      const dist = calculateDistance(
+        parseFloat(order.restaurantLatitude!),
+        parseFloat(order.restaurantLongitude!),
+        parseFloat(driver.latitude!),
+        parseFloat(driver.longitude!)
+      );
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearest = driver;
+      }
+    });
+
+    return { driver: nearest, distance: minDistance.toFixed(2) };
+  };
+
   const filteredOrders = orders?.filter(order => {
     if (statusFilter === 'all') return true;
     return order.status === statusFilter;
@@ -184,16 +315,25 @@ export default function AdminOrders() {
       <div className="sticky top-0 z-20 bg-white border-b shadow-sm px-6 py-4">
         <div className="flex items-center gap-3">
           <Package className="h-7 w-7 text-primary" />
-          <div>
+          <div className="flex-1">
             <h1 className="text-xl font-bold text-foreground">إدارة الطلبات</h1>
             <p className="text-sm text-muted-foreground">متابعة وإدارة جميع الطلبات</p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAdminLocation('/admin/driver-tracking')}
+            className="gap-2"
+          >
+            <Navigation className="h-4 w-4" />
+            تتبع السائقين المباشر
+          </Button>
         </div>
       </div>
 
       <div className="p-6">
       <div className="flex flex-col lg:flex-row gap-6">
-        {/* القائمة الجانبية للفرز - ثابتة عند التمرير */}
+        {/* القائمة الجانبية للفرز */}
         <div className="lg:w-64 flex-shrink-0">
           <div className="lg:sticky lg:top-24 space-y-4">
             <Card>
@@ -204,62 +344,28 @@ export default function AdminOrders() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Button 
-                  variant={statusFilter === 'all' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('all')}
-                >
-                  <Package className="h-4 w-4" />
-                  جميع الطلبات
-                </Button>
-                <Button 
-                  variant={statusFilter === 'pending' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('pending')}
-                >
-                  <Package className="h-4 w-4 text-yellow-500" />
-                  جديدة (انتظار)
-                </Button>
-                <Button 
-                  variant={statusFilter === 'confirmed' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('confirmed')}
-                >
-                  <CheckCircle className="h-4 w-4 text-blue-500" />
-                  مؤكدة
-                </Button>
-                <Button 
-                  variant={statusFilter === 'preparing' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('preparing')}
-                >
-                  <Package className="h-4 w-4 text-orange-500" />
-                  قيد التحضير
-                </Button>
-                <Button 
-                  variant={statusFilter === 'on_way' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('on_way')}
-                >
-                  <Truck className="h-4 w-4 text-purple-500" />
-                  في الطريق
-                </Button>
-                <Button 
-                  variant={statusFilter === 'delivered' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('delivered')}
-                >
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  مكتملة
-                </Button>
-                <Button 
-                  variant={statusFilter === 'cancelled' ? 'default' : 'ghost'} 
-                  className="w-full justify-start gap-2"
-                  onClick={() => setStatusFilter('cancelled')}
-                >
-                  <XCircle className="h-4 w-4 text-red-500" />
-                  ملغية
-                </Button>
+                {[
+                  { value: 'all', label: 'جميع الطلبات', icon: <Package className="h-4 w-4" /> },
+                  { value: 'pending', label: 'جديدة (انتظار)', icon: <Package className="h-4 w-4 text-yellow-500" /> },
+                  { value: 'confirmed', label: 'مؤكدة', icon: <CheckCircle className="h-4 w-4 text-blue-500" /> },
+                  { value: 'preparing', label: 'قيد التحضير', icon: <Package className="h-4 w-4 text-orange-500" /> },
+                  { value: 'on_way', label: 'في الطريق', icon: <Truck className="h-4 w-4 text-purple-500" /> },
+                  { value: 'delivered', label: 'مكتملة', icon: <CheckCircle className="h-4 w-4 text-green-500" /> },
+                  { value: 'cancelled', label: 'ملغية', icon: <XCircle className="h-4 w-4 text-red-500" /> },
+                ].map(({ value, label, icon }) => (
+                  <Button
+                    key={value}
+                    variant={statusFilter === value ? 'default' : 'ghost'}
+                    className="w-full justify-start gap-2"
+                    onClick={() => setStatusFilter(value)}
+                  >
+                    {icon}
+                    {label}
+                    <Badge variant="secondary" className="mr-auto text-xs">
+                      {value === 'all' ? orders?.length || 0 : orders?.filter(o => o.status === value).length || 0}
+                    </Badge>
+                  </Button>
+                ))}
               </CardContent>
             </Card>
 
@@ -276,6 +382,14 @@ export default function AdminOrders() {
                   <div className="flex justify-between text-yellow-600">
                     <span>جديد:</span>
                     <span className="font-bold">{orders?.filter(o => o.status === 'pending').length || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-green-600">
+                    <span>مكتمل:</span>
+                    <span className="font-bold">{orders?.filter(o => o.status === 'delivered').length || 0}</span>
+                  </div>
+                  <div className="flex justify-between text-red-600">
+                    <span>ملغي:</span>
+                    <span className="font-bold">{orders?.filter(o => o.status === 'cancelled').length || 0}</span>
                   </div>
                 </div>
               </CardContent>
@@ -334,7 +448,7 @@ export default function AdminOrders() {
                             <Package className="h-6 w-6 text-primary" />
                           </div>
                           <div>
-                            <CardTitle className="text-lg">طلب #{order.id}</CardTitle>
+                            <CardTitle className="text-lg">طلب #{order.orderNumber || order.id.slice(0,8)}</CardTitle>
                             <p className="text-sm text-muted-foreground">
                               {formatDate(order.createdAt)}
                             </p>
@@ -373,7 +487,21 @@ export default function AdminOrders() {
 
                       {/* Order Items */}
                       <div>
-                        <h4 className="font-semibold text-foreground mb-2">تفاصيل الطلب</h4>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-semibold text-foreground">تفاصيل الطلب</h4>
+                          {order.status !== 'delivered' && order.status !== 'cancelled' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEditPrices(order)}
+                              className="gap-1 text-orange-600 border-orange-300 hover:bg-orange-50"
+                              data-testid={`button-edit-prices-${order.id}`}
+                            >
+                              <Edit className="h-3 w-3" />
+                              تعديل الأسعار
+                            </Button>
+                          )}
+                        </div>
                         <div className="space-y-2">
                           {items.map((item: any, index: number) => (
                             <div key={index} className="flex justify-between items-center text-sm">
@@ -393,8 +521,8 @@ export default function AdminOrders() {
                             <span className="text-foreground">{formatCurrency(order.deliveryFee)}</span>
                           </div>
                           <div className="flex justify-between items-center font-semibold">
-                            <span className="text-foreground">المجموع:</span>
-                            <span className="text-primary">{formatCurrency(order.totalAmount)}</span>
+                            <span className="text-foreground">المجموع الكلي:</span>
+                            <span className="text-primary text-lg">{formatCurrency(order.totalAmount)}</span>
                           </div>
                         </div>
                       </div>
@@ -404,7 +532,7 @@ export default function AdminOrders() {
                         <div>
                           <h4 className="font-semibold text-foreground mb-1">طريقة الدفع</h4>
                           <p className="text-sm text-muted-foreground">
-                            {order.paymentMethod === 'cash' ? 'دفع نقدي' : 'مدفوع مسبقاً'}
+                            {order.paymentMethod === 'cash' ? '💵 دفع نقدي' : '💳 مدفوع مسبقاً'}
                           </p>
                         </div>
                         {order.notes && (
@@ -430,6 +558,31 @@ export default function AdminOrders() {
                               </Badge>
                             )}
                           </div>
+
+                          {!order.driverId && getNearestDriver(order) && (
+                            <div className="mb-3 p-2 bg-yellow-100 border border-yellow-200 rounded text-xs flex items-center justify-between">
+                              <span className="flex items-center gap-1 text-yellow-800">
+                                <Navigation className="h-3 w-3" />
+                                السائق الأقرب للمطعم: <strong>{getNearestDriver(order)?.driver.name}</strong> 
+                                ({getNearestDriver(order)?.distance} كم)
+                              </span>
+                              <Button 
+                                size="xs" 
+                                variant="outline" 
+                                className="h-6 text-[10px] border-yellow-400 text-yellow-800 hover:bg-yellow-200"
+                                onClick={() => {
+                                  const nearest = getNearestDriver(order)?.driver;
+                                  if (nearest) {
+                                    setAssigningOrderId(order.id);
+                                    setSelectedDriver(prev => ({ ...prev, [order.id]: nearest.id }));
+                                  }
+                                }}
+                              >
+                                اختياره
+                              </Button>
+                            </div>
+                          )}
+
                           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full">
                             <Select 
                               value={assigningOrderId === order.id ? (selectedDriver[order.id] || '') : (order.driverId || '')} 
@@ -472,11 +625,8 @@ export default function AdminOrders() {
                         </div>
                       )}
 
-
-
                       {/* Actions */}
                       <div className="flex flex-wrap gap-2 pt-4 border-t border-border">
-
                         {nextStatus && order.status !== 'delivered' && order.status !== 'cancelled' && (
                           <Button
                             onClick={() => updateOrderStatusMutation.mutate({ 
@@ -542,7 +692,7 @@ export default function AdminOrders() {
               <div className="text-center py-12">
                 <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-foreground mb-2">
-                  {statusFilter === 'all' ? 'لا توجد طلبات' : `لا توجد طلبات ${statusFilter === 'pending' ? 'في الانتظار' : statusFilter === 'confirmed' ? 'مؤكدة' : statusFilter === 'preparing' ? 'قيد التحضير' : statusFilter === 'on_way' ? 'في الطريق' : statusFilter === 'delivered' ? 'مكتملة' : 'ملغية'}`}
+                  {statusFilter === 'all' ? 'لا توجد طلبات' : `لا توجد طلبات بهذه الحالة`}
                 </h3>
                 <p className="text-muted-foreground">
                   {statusFilter === 'all' 
@@ -556,6 +706,123 @@ export default function AdminOrders() {
         </div>
       </div>
       </div>
+
+      {/* نافذة تعديل أسعار الطلب */}
+      <Dialog open={!!editPricesOrder} onOpenChange={(open) => !open && setEditPricesOrder(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700">
+              <DollarSign className="h-5 w-5" />
+              تعديل أسعار الطلب #{editPricesOrder?.orderNumber || editPricesOrder?.id?.slice(0, 8)}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* تعليمات */}
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800">
+              <strong>ملاحظة:</strong> استخدم هذه الأداة عند اختلاف أسعار المطعم عن أسعار التطبيق.
+              سيتم تحديث إجمالي الطلب تلقائياً عند تعديل الأسعار.
+            </div>
+
+            {/* عناصر الطلب */}
+            <div>
+              <Label className="text-base font-semibold mb-3 block">عناصر الطلب</Label>
+              <div className="space-y-3">
+                {editedItems.map((item, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">الكمية: {item.quantity}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-muted-foreground whitespace-nowrap">سعر الوحدة:</Label>
+                      <Input
+                        type="number"
+                        value={item.price}
+                        onChange={(e) => {
+                          const newItems = [...editedItems];
+                          newItems[index] = { ...item, price: parseFloat(e.target.value) || 0 };
+                          setEditedItems(newItems);
+                        }}
+                        className="w-28 text-center"
+                        min="0"
+                        step="0.5"
+                      />
+                      <span className="text-xs text-muted-foreground">ريال</span>
+                    </div>
+                    <div className="text-sm font-semibold text-primary w-20 text-left">
+                      {formatCurrency(item.price * item.quantity)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* رسوم التوصيل */}
+            <div className="flex items-center gap-4 p-3 bg-blue-50 rounded-lg">
+              <Label className="font-medium whitespace-nowrap">رسوم التوصيل:</Label>
+              <Input
+                type="number"
+                value={editedDeliveryFee}
+                onChange={(e) => setEditedDeliveryFee(e.target.value)}
+                className="w-32 text-center"
+                min="0"
+                step="0.5"
+              />
+              <span className="text-sm text-muted-foreground">ريال</span>
+            </div>
+
+            {/* ملخص الإجماليات */}
+            <div className="border rounded-lg p-4 space-y-2 bg-white">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">المجموع الفرعي:</span>
+                <span className="font-medium">{formatCurrency(calcSubtotal())}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">رسوم التوصيل:</span>
+                <span className="font-medium">{formatCurrency(parseFloat(editedDeliveryFee || '0'))}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base border-t pt-2">
+                <span>المجموع الكلي الجديد:</span>
+                <span className="text-primary">{formatCurrency(calcTotal())}</span>
+              </div>
+              {editPricesOrder && (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>المجموع القديم:</span>
+                  <span className="line-through">{formatCurrency(editPricesOrder.totalAmount)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* سبب التعديل */}
+            <div>
+              <Label htmlFor="adjustment-note" className="font-medium">سبب تعديل الأسعار <span className="text-red-500">*</span></Label>
+              <Textarea
+                id="adjustment-note"
+                value={priceAdjustmentNote}
+                onChange={(e) => setPriceAdjustmentNote(e.target.value)}
+                placeholder="مثال: الأسعار في المطعم مختلفة عن التطبيق، تم التعديل بعد مراجعة السائق..."
+                className="mt-1"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" onClick={() => setEditPricesOrder(null)}>
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleSavePrices}
+              disabled={updatePricesMutation.isPending || !priceAdjustmentNote.trim()}
+              className="bg-orange-600 hover:bg-orange-700 gap-2"
+            >
+              <DollarSign className="h-4 w-4" />
+              {updatePricesMutation.isPending ? 'جاري الحفظ...' : 'حفظ التعديلات'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

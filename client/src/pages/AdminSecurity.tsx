@@ -92,7 +92,7 @@ export default function AdminSecurity() {
                       <div className="text-xs">{log.ipAddress}</div>
                       <div className="text-[10px] text-gray-500">{log.device}</div>
                     </TableCell>
-                    <TableCell>{new Date(log.createdAt).toLocaleString('ar-SA')}</TableCell>
+                    <TableCell>{new Date(log.createdAt).toLocaleString('ar-YE')}</TableCell>
                     <TableCell>
                       <Badge variant={log.status === 'success' ? 'default' : log.status === 'failure' ? 'destructive' : 'secondary'}>
                         {log.status === 'success' ? 'ناجح' : log.status === 'failure' ? 'فشل' : 'تحذير'}

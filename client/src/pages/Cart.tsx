@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation as useWouterLocation } from 'wouter';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowRight, Trash2, MapPin, Calendar, Clock, DollarSign, Plus, Minus, ShoppingCart } from 'lucide-react';
+import { ArrowRight, Trash2, MapPin, Calendar, Clock, DollarSign, Plus, Minus, ShoppingCart, AlertCircle, WifiOff } from 'lucide-react';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { LocationPicker, LocationData } from '@/components/LocationPicker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,25 +10,56 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
+import AppClosedOverlay from '@/components/AppClosedOverlay';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useCart } from '../context/CartContext';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import { apiRequest } from '@/lib/queryClient';
 import { formatCurrency } from '@/lib/utils';
 import { useUserLocation } from '@/context/LocationContext';
 import type { InsertOrder, Restaurant } from '@shared/schema';
+import { getAppStatus, getRestaurantStatus } from '@/utils/restaurantHours';
+import ScheduledOrderDialog from '@/components/ScheduledOrderDialog';
+
+function isDriverAvailable(driverStart: string, driverEnd: string): boolean {
+  const now = new Date();
+  const currentTime = now.toTimeString().slice(0, 5);
+  const toMins = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const cur = toMins(currentTime);
+  const start = toMins(driverStart);
+  const end = toMins(driverEnd);
+  return end > start ? (cur >= start && cur < end) : (cur >= start || cur < end);
+}
 
 export default function Cart() {
   const [, setLocation] = useWouterLocation();
   const { state, removeItem, updateQuantity, clearCart, setDeliveryFee } = useCart();
   const { items, subtotal, total, deliveryFee, restaurantId } = state;
   const { toast } = useToast();
+  const { user } = useAuth();
   const { location: userLocation } = useUserLocation();
+  const { isOnline } = useNetworkStatus();
+
+  const [showScheduledDialog, setShowScheduledDialog] = useState(false);
+  const [showConfirmOrder, setShowConfirmOrder] = useState(false);
+  const [pendingOrderData, setPendingOrderData] = useState<any>(null);
+  const [showAppClosedOverlay, setShowAppClosedOverlay] = useState(false);
 
   const [orderForm, setOrderForm] = useState({
-    customerName: localStorage.getItem('customer_name') || '',
-    customerPhone: localStorage.getItem('customer_phone') || '',
-    customerEmail: localStorage.getItem('customer_email') || '',
-    deliveryAddress: '',
+    customerName: user?.name || localStorage.getItem('customer_name') || '',
+    customerPhone: user?.phone || localStorage.getItem('customer_phone') || '',
+    customerEmail: user?.email || localStorage.getItem('customer_email') || '',
+    deliveryAddress: user?.address || '',
     notes: '',
     paymentMethod: 'cash',
     deliveryTime: 'now',
@@ -56,6 +88,27 @@ export default function Cart() {
   const { data: settings } = useQuery<any[]>({
     queryKey: ['/api/ui-settings'],
   });
+
+  const appStatus = useMemo(() => {
+    const openingTime = (settings as any[])?.find((s: any) => s.key === 'opening_time')?.value || '08:00';
+    const closingTime = (settings as any[])?.find((s: any) => s.key === 'closing_time')?.value || '23:00';
+    const storeStatus = (settings as any[])?.find((s: any) => s.key === 'store_status')?.value;
+    return getAppStatus(openingTime, closingTime, storeStatus);
+  }, [settings]);
+
+  const driverHours = useMemo(() => {
+    const start = (settings as any[])?.find((s: any) => s.key === 'driver_start_time')?.value || '09:00';
+    const end = (settings as any[])?.find((s: any) => s.key === 'driver_end_time')?.value || '21:00';
+    const enabled = (settings as any[])?.find((s: any) => s.key === 'enable_scheduled_orders')?.value !== 'false';
+    return { start, end, scheduledOrdersEnabled: enabled };
+  }, [settings]);
+
+  const restaurantStatus = useMemo(() => {
+    if (!restaurant) return null;
+    return getRestaurantStatus(restaurant);
+  }, [restaurant]);
+
+  const canPlaceOrder = appStatus.isOpen && (restaurantStatus === null || restaurantStatus.isOpen);
 
   const handleLocationSelect = async (location: LocationData) => {
     setOrderForm(prev => ({
@@ -95,14 +148,20 @@ export default function Cart() {
   };
 
   const placeOrderMutation = useMutation({
-    mutationFn: async (orderData: InsertOrder) => {
+    mutationFn: async (orderData: any) => {
+      if (!isOnline) {
+        throw new Error('لا يوجد اتصال بالإنترنت. يرجى التحقق من الاتصال والمحاولة مرة أخرى.');
+      }
       const response = await apiRequest('POST', '/api/orders', orderData);
       return response.json();
     },
     onSuccess: (data) => {
+      const isScheduled = data?.order?.status === 'scheduled';
       toast({
-        title: "تم تأكيد طلبك بنجاح!",
-        description: "سيتم التواصل معك قريباً",
+        title: isScheduled ? "✅ تم جدولة طلبك بنجاح!" : "✅ تم تأكيد طلبك بنجاح!",
+        description: isScheduled
+          ? `سيصلك طلبك في الموعد المحدد`
+          : "سيتم التواصل معك قريباً",
       });
       
       localStorage.setItem('customer_phone', orderForm.customerPhone);
@@ -112,18 +171,98 @@ export default function Cart() {
       }
       
       clearCart();
-      setLocation('/orders');
+      if (data?.order?.id) {
+        setLocation(`/orders/${data.order.id}`);
+      } else {
+        setLocation('/orders');
+      }
     },
-    onError: () => {
+    onError: (error: any) => {
+      const raw = error?.message || '';
+      let displayMsg = 'يرجى المحاولة مرة أخرى';
+      let serverCode = '';
+
+      if (raw.includes('لا يوجد اتصال')) {
+        displayMsg = raw;
+      } else if (raw.includes(':')) {
+        const serverPart = raw.split(':').slice(1).join(':').trim();
+        try {
+          const parsed = JSON.parse(serverPart);
+          displayMsg = parsed.error || parsed.message || serverPart || displayMsg;
+          serverCode = parsed.code || '';
+        } catch {
+          if (serverPart) displayMsg = serverPart;
+        }
+      }
+
+      // If server says app is closed, show the overlay instead of a toast
+      if (
+        serverCode === 'APP_CLOSED' ||
+        displayMsg.includes('التطبيق مغلق') ||
+        displayMsg.includes('مغلق حالياً')
+      ) {
+        setShowAppClosedOverlay(true);
+        return;
+      }
+
       toast({
         title: "خطأ في تأكيد الطلب",
-        description: "يرجى المحاولة مرة أخرى",
+        description: displayMsg,
         variant: "destructive",
       });
     },
   });
 
+  const buildOrderData = (overrides?: { scheduledDate?: string; scheduledTimeSlot?: string; status?: string; deliveryPreference?: string }) => ({
+    customerName: orderForm.customerName,
+    customerPhone: orderForm.customerPhone,
+    customerEmail: orderForm.customerEmail || undefined,
+    customerId: user?.id || undefined,
+    deliveryAddress: orderForm.deliveryAddress,
+    notes: orderForm.notes || undefined,
+    paymentMethod: orderForm.paymentMethod,
+    items: JSON.stringify(items),
+    subtotal: subtotal.toString(),
+    deliveryFee: deliveryFee.toString(),
+    total: (subtotal + deliveryFee).toString(),
+    totalAmount: (subtotal + deliveryFee).toString(),
+    restaurantId: restaurantId || null,
+    status: overrides?.status || 'pending',
+    orderNumber: `ORD${Date.now()}`,
+    customerLocationLat: orderForm.locationData?.lat?.toString(),
+    customerLocationLng: orderForm.locationData?.lng?.toString(),
+    deliveryPreference: overrides?.deliveryPreference || orderForm.deliveryTime,
+    scheduledDate: overrides?.scheduledDate || (orderForm.deliveryTime === 'later' ? orderForm.deliveryDate : undefined),
+    scheduledTimeSlot: overrides?.scheduledTimeSlot || (orderForm.deliveryTime === 'later' ? orderForm.deliveryTimeSlot : undefined),
+  });
+
+  const handleScheduledConfirm = (scheduledDate: string, scheduledTimeSlot: string) => {
+    setShowScheduledDialog(false);
+    const orderData = buildOrderData({
+      scheduledDate,
+      scheduledTimeSlot,
+      status: 'scheduled',
+      deliveryPreference: 'scheduled',
+    });
+    placeOrderMutation.mutate(orderData);
+  };
+
   const handlePlaceOrder = () => {
+    if (!isOnline) {
+      toast({
+        title: "لا يوجد اتصال بالإنترنت",
+        description: "يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!appStatus.isOpen || (restaurantStatus && !restaurantStatus.isOpen)) {
+      // عرض واجهة الإغلاق مع خيار الجدولة
+      setShowAppClosedOverlay(true);
+      return;
+    }
+
     if (!orderForm.customerName || !orderForm.customerPhone || !orderForm.deliveryAddress) {
       toast({
         title: "معلومات ناقصة",
@@ -142,33 +281,107 @@ export default function Cart() {
       return;
     }
 
-    const orderData: InsertOrder = {
-      ...orderForm,
-      items: JSON.stringify(items),
-      subtotal: subtotal.toString(),
-      deliveryFee: deliveryFee.toString(),
-      total: (subtotal + deliveryFee).toString(),
-      totalAmount: (subtotal + deliveryFee).toString(),
-      restaurantId: restaurantId || null,
-      status: 'pending',
-      orderNumber: `ORD${Date.now()}`,
-      customerLocationLat: orderForm.locationData?.lat.toString(),
-      customerLocationLng: orderForm.locationData?.lng.toString(),
-      deliveryPreference: orderForm.deliveryTime,
-      scheduledDate: orderForm.deliveryTime === 'later' ? orderForm.deliveryDate : undefined,
-      scheduledTimeSlot: orderForm.deliveryTime === 'later' ? orderForm.deliveryTimeSlot : undefined,
-    };
+    // فحص ساعات عمل الموصلين - إذا كانوا غير متاحين اعرض حوار الجدولة
+    if (driverHours.scheduledOrdersEnabled && orderForm.deliveryTime === 'now') {
+      const driversAvailable = isDriverAvailable(driverHours.start, driverHours.end);
+      if (!driversAvailable) {
+        setShowScheduledDialog(true);
+        return;
+      }
+    }
 
+    setShowConfirmOrder(true);
+  };
+
+  const confirmAndPlaceOrder = () => {
+    setShowConfirmOrder(false);
+    placeOrderMutation.mutate(buildOrderData());
+  };
+
+  const appOpeningTime = (settings as any[])?.find((s: any) => s.key === 'opening_time')?.value || '08:00';
+  const appClosingTime = (settings as any[])?.find((s: any) => s.key === 'closing_time')?.value || '23:00';
+
+  // تحديد أي وقت فتح نستخدم (التطبيق أم المطعم)
+  const effectiveOpeningTime = (!appStatus.isOpen) 
+    ? appOpeningTime 
+    : (restaurantStatus?.nextOpenTime || restaurant?.openingTime || '08:00');
+  
+  const effectiveMessage = (!appStatus.isOpen)
+    ? (appStatus.message || 'سيُفتح التطبيق قريباً، يمكنك جدولة طلبك الآن')
+    : (restaurantStatus?.message || 'المطعم مغلق حالياً، يمكنك جدولة طلبك لموعد لاحق');
+
+  const handleScheduleFromClosedOverlay = (scheduledDate: string, scheduledTimeSlot: string) => {
+    if (!orderForm.customerName || !orderForm.customerPhone || !orderForm.deliveryAddress) {
+      toast({
+        title: "معلومات ناقصة",
+        description: "يرجى ملء بياناتك (الاسم، الهاتف، العنوان) أولاً قبل الجدولة",
+        variant: "destructive",
+      });
+      setShowAppClosedOverlay(false);
+      return;
+    }
+    setShowAppClosedOverlay(false);
+    const orderData = buildOrderData({
+      scheduledDate,
+      scheduledTimeSlot,
+      status: 'scheduled',
+      deliveryPreference: 'scheduled',
+    });
     placeOrderMutation.mutate(orderData);
   };
 
   return (
     <div className="min-h-screen bg-white">
+      {showAppClosedOverlay && (
+        <AppClosedOverlay
+          openingTime={effectiveOpeningTime}
+          closingTime={appClosingTime}
+          message={effectiveMessage}
+          onScheduleOrder={driverHours.scheduledOrdersEnabled ? handleScheduleFromClosedOverlay : undefined}
+          onClose={() => setShowAppClosedOverlay(false)}
+          scheduledOrdersEnabled={driverHours.scheduledOrdersEnabled}
+        />
+      )}
+
+      <ScheduledOrderDialog
+        open={showScheduledDialog}
+        onClose={() => setShowScheduledDialog(false)}
+        onConfirm={handleScheduledConfirm}
+        driverStartTime={driverHours.start}
+      />
+
+      <AlertDialog open={showConfirmOrder} onOpenChange={setShowConfirmOrder}>
+        <AlertDialogContent className="bg-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-right">تأكيد الطلب</AlertDialogTitle>
+            <AlertDialogDescription className="text-right">
+              هل أنت متأكد من رغبتك في إرسال هذا الطلب بإجمالي {formatCurrency(subtotal + deliveryFee)}؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row gap-2 justify-end">
+            <AlertDialogCancel className="mt-0">إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmAndPlaceOrder}
+              className="bg-black hover:bg-red-600 text-white"
+            >
+              تأكيد وإرسال
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {!isOnline && (
+        <div className="bg-red-600 text-white text-center py-2 px-4 flex items-center justify-center gap-2 text-sm font-bold">
+          <WifiOff className="h-4 w-4" />
+          لا يوجد اتصال بالإنترنت - يرجى التحقق من الاتصال
+        </div>
+      )}
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-8 border-b pb-4">
           <div className="flex items-center gap-3">
-            <div className="text-3xl font-black tracking-tighter">
-              <span className="text-[#388e3c]">طم</span><span className="text-[#d32f2f]">طوم</span>
+            <div className="text-3xl font-black tracking-tighter flex items-center gap-2">
+              <span className="text-primary">واصل</span>
+              <span className="text-[10px] font-bold text-primary/70 tracking-[0.3em] border border-primary/30 rounded px-1.5 py-0.5">WASEL</span>
             </div>
             <h1 className="text-3xl font-black uppercase tracking-tighter"> - السلة</h1>
           </div>
@@ -477,17 +690,45 @@ export default function Cart() {
               </CardContent>
             </Card>
 
+            {/* رسالة إغلاق التطبيق أو المتجر */}
+            {items.length > 0 && !canPlaceOrder && (
+              <Card className="border-red-200 bg-red-50">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-red-700 mb-1">
+                        {!appStatus.isOpen ? 'التطبيق مغلق حالياً' : 'المتجر مغلق حالياً'}
+                      </p>
+                      <p className="text-sm text-red-600">
+                        {!appStatus.isOpen ? appStatus.message : restaurantStatus?.message}
+                      </p>
+                      <p className="text-xs text-red-500 mt-1">
+                        أوقات العمل: {appStatus.openingTime} - {appStatus.closingTime}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* زر تأكيد الطلب */}
             {items.length > 0 && (
               <Card>
                 <CardContent className="p-4">
                   <Button 
-                    className="w-full bg-black hover:bg-red-600 text-white font-semibold py-3 text-lg"
+                    className={`w-full font-semibold py-3 text-lg ${canPlaceOrder ? 'bg-black hover:bg-red-600 text-white' : 'bg-gray-400 text-white cursor-not-allowed'}`}
                     onClick={handlePlaceOrder}
-                    disabled={placeOrderMutation.isPending || !orderForm.locationData}
+                    disabled={placeOrderMutation.isPending || !orderForm.locationData || !canPlaceOrder}
                     data-testid="button-place-order"
                   >
-                    {placeOrderMutation.isPending ? 'جاري تأكيد الطلب...' : !orderForm.locationData ? 'يرجى تحديد الموقع للمتابعة' : `تأكيد الطلب - ${formatCurrency(total)}`}
+                    {placeOrderMutation.isPending 
+                      ? 'جاري تأكيد الطلب...' 
+                      : !canPlaceOrder 
+                        ? (!appStatus.isOpen ? '🔒 التطبيق مغلق حالياً' : '🔒 المتجر مغلق حالياً')
+                        : !orderForm.locationData 
+                          ? 'يرجى تحديد الموقع للمتابعة' 
+                          : `تأكيد الطلب - ${formatCurrency(total)}`}
                   </Button>
                 </CardContent>
               </Card>

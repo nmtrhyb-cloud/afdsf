@@ -208,7 +208,7 @@ export default function WalletPage() {
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     className="text-right font-bold pl-12 h-12 text-lg"
                   />
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">ر.س</div>
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">ريال</div>
                 </div>
               </div>
               <div className="space-y-2 text-right">

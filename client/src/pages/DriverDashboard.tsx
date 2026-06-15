@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNotificationSync } from '@/hooks/useNotificationSync';
 import { 
   MapPin, Phone, Clock, CheckCircle, Bell, Package, DollarSign, User, 
   BarChart3, Navigation, LogOut, Wallet, Menu, X, ChevronRight,
@@ -491,7 +490,7 @@ function SidebarContent({ activeTab, onTabChange, availableOrders, myOrders }: a
     <div className="h-full flex flex-col">
       <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
         <h2 className="text-xl font-bold text-gray-900">📍 تطبيق السائق</h2>
-        <p className="text-sm text-gray-600 font-bold">نظام طمطوم للتوصيل</p>
+        <p className="text-sm text-gray-600 font-bold">نظام واصل للتوصيل</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
@@ -654,7 +653,7 @@ function OrderCard({ order, isLoading, onAccept, onStatusUpdate, actionType, isS
             </div>
             <p className="text-xs text-gray-500 font-bold flex items-center gap-1">
               <Clock size={12} />
-              {new Date(order.createdAt).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
+              {new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}
             </p>
           </div>
           <div className="text-right">

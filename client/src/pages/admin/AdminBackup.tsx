@@ -40,7 +40,7 @@ export default function AdminBackup() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      const now = new Date().toLocaleString('ar-SA');
+      const now = new Date().toLocaleString('ar-YE');
       setLastBackup(now);
       localStorage.setItem('last_backup_date', now);
 

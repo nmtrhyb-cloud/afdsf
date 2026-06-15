@@ -68,22 +68,12 @@ export default function ProductDetails() {
     );
   }
 
-  const sizes = product.sizes ? product.sizes.split(',') : [];
-  const colors = product.colors ? product.colors.split(',') : [];
   const discountPercent = product.originalPrice 
     ? Math.round((1 - parseFloat(String(product.price)) / parseFloat(String(product.originalPrice))) * 100)
     : 0;
 
   const handleAddToCart = () => {
-    if (sizes.length > 0 && !selectedSize) {
-      toast({
-        title: "يرجى اختيار المقاس",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Add to cart with quantity and selected options
+    // Add to cart with quantity
     for (let i = 0; i < quantity; i++) {
       addItem(product, product.restaurantId || 'unknown', 'متجر');
     }
@@ -169,53 +159,6 @@ export default function ProductDetails() {
 
             <Separator className="mb-8" />
 
-            {/* Color Selection */}
-            {colors.length > 0 && (
-              <div className="mb-8">
-                <div className="flex justify-between mb-3">
-                  <span className="font-bold text-sm">اللون: <span className="text-gray-500 font-medium">{selectedColor || 'اختر لوناً'}</span></span>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  {colors.map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setSelectedColor(color.trim())}
-                      className={`w-10 h-10 rounded-full border-2 transition-all ${
-                        selectedColor === color.trim() ? 'border-black scale-110' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: color.trim().toLowerCase() }}
-                      title={color.trim()}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Size Selection */}
-            {sizes.length > 0 && (
-              <div className="mb-8">
-                <div className="flex justify-between mb-3">
-                  <span className="font-bold text-sm">المقاس: <span className="text-gray-500 font-medium">{selectedSize || 'اختر مقاساً'}</span></span>
-                  <button className="text-xs font-bold underline text-gray-500">دليل المقاسات</button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {sizes.map((size) => (
-                    <button
-                      key={size}
-                      onClick={() => setSelectedSize(size.trim())}
-                      className={`min-w-[50px] px-4 py-2 text-sm font-bold border transition-all ${
-                        selectedSize === size.trim() 
-                          ? 'bg-black text-white border-black' 
-                          : 'bg-white text-black border-gray-200 hover:border-black'
-                      }`}
-                    >
-                      {size.trim()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Quantity */}
             <div className="mb-8">
               <span className="font-bold text-sm block mb-3">الكمية:</span>
@@ -259,7 +202,7 @@ export default function ProductDetails() {
                 <Truck className="h-5 w-5 text-gray-400" />
                 <div className="text-[10px] leading-tight">
                   <p className="font-bold text-gray-900">شحن سريع</p>
-                  <p className="text-gray-500">توصيل خلال 3-7 أيام</p>
+                  <p className="text-gray-500">توصيل سريع وموثوق</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -267,20 +210,6 @@ export default function ProductDetails() {
                 <div className="text-[10px] leading-tight">
                   <p className="font-bold text-gray-900">دفع آمن</p>
                   <p className="text-gray-500">100% حماية لمدفوعاتك</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <RotateCcw className="h-5 w-5 text-gray-400" />
-                <div className="text-[10px] leading-tight">
-                  <p className="font-bold text-gray-900">إرجاع مجاني</p>
-                  <p className="text-gray-500">خلال 15 يوماً من الاستلام</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Share2 className="h-5 w-5 text-gray-400" />
-                <div className="text-[10px] leading-tight">
-                  <p className="font-bold text-gray-900">مشاركة</p>
-                  <p className="text-gray-500">شارك المنتج مع أصدقائك</p>
                 </div>
               </div>
             </div>

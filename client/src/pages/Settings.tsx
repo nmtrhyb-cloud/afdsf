@@ -40,7 +40,7 @@ export default function Settings() {
       promotions: true,
       sound: true,
     },
-    currency: 'SAR',
+    currency: 'YER',
     autoLocation: true,
     biometric: false,
   });
@@ -140,7 +140,7 @@ export default function Settings() {
           type: 'select',
           value: settings.currency,
           options: [
-            { value: 'SAR', label: 'الريال السعودي (SAR)' },
+            { value: 'YER', label: 'الريال اليمني (YER)' },
           ],
           onChange: (value: string) => handleSimpleSettingChange('currency', value),
         },

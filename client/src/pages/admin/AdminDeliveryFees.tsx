@@ -23,19 +23,18 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { 
   Truck, 
-  MapPin, 
   Settings, 
   Plus, 
-  Edit, 
   Trash2, 
   Save,
   Calculator,
   Percent,
   ShieldCheck,
-  Layers
+  Layers,
+  MapPin,
+  Info
 } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
-import GoogleMapPicker from '@/components/maps/GoogleMapPicker';
 
 interface DeliveryZone {
   id: string;
@@ -56,8 +55,6 @@ interface DeliveryFeeSettings {
   minFee: string;
   maxFee: string;
   freeDeliveryThreshold: string;
-  storeLat?: string;
-  storeLng?: string;
 }
 
 interface GeoZone {
@@ -99,7 +96,6 @@ export default function AdminDeliveryFees() {
   const [activeTab, setActiveTab] = useState('settings');
   const [isAddZoneOpen, setIsAddZoneOpen] = useState(false);
   const [editingZone, setEditingZone] = useState<DeliveryZone | null>(null);
-  const [isMapOpen, setIsMapOpen] = useState(false);
 
   // جلب إعدادات رسوم التوصيل
   const { data: settings, isLoading: settingsLoading } = useQuery<DeliveryFeeSettings>({
@@ -201,18 +197,7 @@ export default function AdminDeliveryFees() {
     minFee: '3',
     maxFee: '50',
     freeDeliveryThreshold: '0',
-    storeLat: '24.7136',
-    storeLng: '46.6753'
   });
-
-  const handleLocationSelect = (location: any) => {
-    setFormSettings(prev => ({
-      ...prev,
-      storeLat: location.lat.toString(),
-      storeLng: location.lng.toString()
-    }));
-    setIsMapOpen(false);
-  };
 
   // حالة منطقة جديدة
   const [newZone, setNewZone] = useState({
@@ -244,8 +229,6 @@ export default function AdminDeliveryFees() {
         minFee: data.minFee ? parseFloat(data.minFee).toString() : '0',
         maxFee: data.maxFee ? parseFloat(data.maxFee).toString() : '0',
         freeDeliveryThreshold: data.freeDeliveryThreshold ? parseFloat(data.freeDeliveryThreshold).toString() : '0',
-        storeLat: data.storeLat ? parseFloat(data.storeLat).toString() : '',
-        storeLng: data.storeLng ? parseFloat(data.storeLng).toString() : '',
       };
       
       console.log('✅ البيانات المحضرة للإرسال:', normalizedData);
@@ -488,45 +471,17 @@ export default function AdminDeliveryFees() {
                 </p>
               </div>
 
-              {/* موقع المتجر الرئيسي */}
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-primary" />
-                  <h3 className="font-semibold text-lg">موقع المتجر الرئيسي</h3>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  يتم استخدام هذا الموقع كنقطة انطلاق لحساب مسافة التوصيل للعميل.
-                </p>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>خط العرض (Latitude)</Label>
-                    <Input
-                      type="text"
-                      value={formSettings.storeLat}
-                      readOnly
-                      className="bg-muted"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>خط الطول (Longitude)</Label>
-                    <Input
-                      type="text"
-                      value={formSettings.storeLng}
-                      readOnly
-                      className="bg-muted"
-                    />
+              {/* ملاحظة الموقع */}
+              <div className="space-y-2 pt-4 border-t">
+                <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <Info className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-300">موقع المتجر</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      يتم تحديد موقع كل متجر من صفحة إدارة المتاجر. الخادم يحسب المسافة تلقائياً بين موقع العميل وموقع المتجر المحدد في الطلب.
+                    </p>
                   </div>
                 </div>
-                
-                <Button 
-                  variant="outline" 
-                  onClick={() => setIsMapOpen(true)}
-                  className="w-full gap-2"
-                >
-                  <MapPin className="h-4 w-4" />
-                  تحديد الموقع على الخريطة
-                </Button>
               </div>
 
               {/* معادلة الحساب */}
@@ -746,15 +701,6 @@ export default function AdminDeliveryFees() {
         </TabsContent>
       </Tabs>
 
-      <GoogleMapPicker
-        isOpen={isMapOpen}
-        onClose={() => setIsMapOpen(false)}
-        onLocationSelect={handleLocationSelect}
-        initialLocation={{
-          lat: parseFloat(formSettings.storeLat || '24.7136'),
-          lng: parseFloat(formSettings.storeLng || '46.6753')
-        }}
-      />
     </div>
   );
 }

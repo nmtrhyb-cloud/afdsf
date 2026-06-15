@@ -565,7 +565,7 @@ export default function DriverApp() {
       <div className="h-full flex flex-col">
         <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
           <h2 className="text-xl font-bold text-gray-900">📍 تطبيق السائق</h2>
-          <p className="text-sm text-gray-600">طمطوم للتوصيل</p>
+          <p className="text-sm text-gray-600">واصل للتوصيل</p>
         </div>
 
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
@@ -738,7 +738,7 @@ function OrderCard({ order, isLoading, onAccept, onStatusUpdate, actionType, isS
             </div>
             <p className="text-sm text-gray-500 flex items-center gap-1 mt-1">
               <Clock size={14} />
-              {new Date(order.createdAt).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })}
+              {new Date(order.createdAt).toLocaleTimeString('ar-YE', { hour: '2-digit', minute: '2-digit' })}
             </p>
           </div>
           <div className="text-right flex-shrink-0">

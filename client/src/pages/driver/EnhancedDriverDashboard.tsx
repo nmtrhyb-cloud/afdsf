@@ -90,6 +90,7 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
   const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const driverWsRef = React.useRef<WebSocket | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { getSetting: getSettingValue } = useUiSettings();
@@ -98,80 +99,93 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
 
   const driverToken = localStorage.getItem('driver_token');
 
-  // WebSocket Connection with reconnection logic
+  // Driver WebSocket — connection dedicated to this driver (independent of customer WS_MANAGER)
+  const activeTabRef = React.useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
   useEffect(() => {
     if (!driverId) return;
-    
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     let ws: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let alive = true;
 
     const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      if (!alive) return;
       ws = new WebSocket(wsUrl);
+      driverWsRef.current = ws;
 
       ws.onopen = () => {
-        console.log('Connected to WebSocket');
-        ws?.send(JSON.stringify({
-          type: 'auth',
-          payload: { 
-            userId: driverId,
-            userType: 'driver'
-          }
-        }));
+        try {
+          ws?.send(JSON.stringify({
+            type: 'auth',
+            payload: { userId: driverId, userType: 'driver' }
+          }));
+          console.log('Driver WS connected and authenticated');
+        } catch (e) {
+          console.error('Driver WS auth failed:', e);
+        }
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = (event: MessageEvent) => {
         try {
           const message = JSON.parse(event.data);
-          console.log('WS Message received:', message.type);
-          
-          if (message.type === 'order_update' || message.type === 'new_order_assigned' || message.type === 'order_status_changed' || message.type === 'review_received') {
-            // Invalidate all driver related queries
-            queryClient.invalidateQueries({ queryKey: [`/api/drivers/app/dashboard`] });
-            queryClient.invalidateQueries({ queryKey: ['/api/drivers/orders/available', driverId] });
-            
-            if (message.type === 'review_received') {
-              toast({ 
-                title: '⭐ تقييم جديد!', 
-                description: `لقد حصلت على تقييم جديد: ${message.payload?.rating} نجوم`,
-                variant: 'default'
-              });
-            } else if (message.type === 'new_order_assigned') {
-              toast({ 
-                title: '📦 طلب جديد مُعين لك', 
-                description: message.payload?.message || 'يرجى مراجعة الطلب في صفحة الطلبات المتاحة',
-                variant: 'default'
-              });
-              // Auto switch to available orders tab if currently on dashboard
-              if (activeTab === 'dashboard') {
-                setActiveTab('available');
-              }
-            } else if (message.type === 'order_status_changed') {
-              toast({ 
-                title: 'تحديث حالة الطلب', 
-                description: `تغيرت حالة الطلب #${message.payload?.orderId?.slice(-6)} إلى ${message.payload?.status}` 
-              });
+          const relevantTypes = [
+            'order_update', 'new_order_assigned', 'order_status_changed',
+            'review_received', 'NEW_NOTIFICATION', 'notifications_updated', 'settings_changed'
+          ];
+          if (!relevantTypes.includes(message.type)) return;
+
+          queryClient.invalidateQueries({ queryKey: [`/api/drivers/app/dashboard`] });
+          queryClient.invalidateQueries({ queryKey: ['/api/drivers/orders/available', driverId] });
+          queryClient.invalidateQueries({ queryKey: ['/api/drivers/orders', 'active', driverId] });
+          queryClient.invalidateQueries({ queryKey: ['/api/drivers/wasalni', 'available', driverId] });
+          queryClient.invalidateQueries({ queryKey: ['/api/drivers/wasalni', 'active', driverId] });
+          queryClient.invalidateQueries({ queryKey: ['/api/ui-settings'] });
+
+          if (message.type === 'review_received') {
+            toast({
+              title: '⭐ تقييم جديد!',
+              description: `لقد حصلت على تقييم جديد: ${message.payload?.rating} نجوم`,
+            });
+          } else if (message.type === 'new_order_assigned') {
+            toast({
+              title: '📦 طلب جديد مُعين لك',
+              description: message.payload?.message || 'يرجى مراجعة الطلب في صفحة الطلبات المتاحة',
+            });
+            if (activeTabRef.current === 'dashboard') {
+              setActiveTab('available');
             }
+          } else if (message.type === 'order_status_changed') {
+            toast({
+              title: 'تحديث حالة الطلب',
+              description: `تغيرت حالة الطلب #${message.payload?.orderId?.slice(-6)} إلى ${message.payload?.status}`,
+            });
           }
         } catch (err) {
-          console.error('Failed to parse WS message:', err);
+          console.error('Driver WS message parse error:', err);
         }
       };
 
       ws.onclose = () => {
-        console.log('WebSocket disconnected. Reconnecting...');
-        reconnectTimeout = setTimeout(connect, 3000);
+        if (alive) {
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
       };
 
-      setSocket(ws);
+      ws.onerror = () => {
+        ws?.close();
+      };
     };
 
     connect();
 
     return () => {
-      if (ws) ws.close();
-      clearTimeout(reconnectTimeout);
+      alive = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      ws?.close();
     };
   }, [driverId, queryClient, toast]);
 
@@ -193,7 +207,7 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
       }
       return response.json();
     },
-    refetchInterval: 30000,
+    refetchInterval: 10000,
     enabled: !!driverToken
   });
 
@@ -309,14 +323,16 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
           const lng = position.coords.longitude;
           setCurrentLocation([lat, lng]);
           
-          // Send location update to server via WebSocket
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({
+          // Send location update to server via the driver's dedicated WebSocket
+          const ws = driverWsRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
               type: 'location_update',
               payload: {
                 driverId,
                 latitude: lat,
-                longitude: lng
+                longitude: lng,
+                currentLocation: `📍 ${lat.toFixed(4)}, ${lng.toFixed(4)}`
               }
             }));
           }
@@ -326,14 +342,14 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
         },
         {
           enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0,
+          timeout: 10000,
+          maximumAge: 5000,
         }
       );
 
       return () => navigator.geolocation.clearWatch(watchId);
     }
-  }, [socket, driverId]);
+  }, [driverId]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -565,10 +581,10 @@ export default function EnhancedDriverDashboard({ driverId, onLogout }: Enhanced
                         <Button 
                           variant="outline" 
                           className="w-full border-green-600 text-green-600 hover:bg-green-50"
-                          onClick={() => acceptOrderMutation.mutate(order.id)}
-                          disabled={acceptOrderMutation.isPending}
+                          onClick={() => { setAcceptingOrderId(order.id); acceptOrderMutation.mutate(order.id); }}
+                          disabled={acceptingOrderId === order.id && acceptOrderMutation.isPending}
                         >
-                          {acceptOrderMutation.isPending ? 'جاري القبول...' : 'قبول الطلب فوراً'}
+                          {acceptingOrderId === order.id && acceptOrderMutation.isPending ? 'جاري القبول...' : 'قبول الطلب فوراً'}
                         </Button>
                       </CardContent>
                     </Card>

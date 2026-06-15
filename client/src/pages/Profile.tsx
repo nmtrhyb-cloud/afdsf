@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
-import { ArrowRight, User, Phone, Mail, MapPin, Settings, Shield, Star, Clock, Receipt, Truck, MessageCircle, Share2, Globe } from 'lucide-react';
+import { ArrowRight, User, Phone, Mail, MapPin, Settings, Shield, Star, Clock, Receipt, Truck, MessageCircle, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -34,7 +34,6 @@ export default function Profile() {
     username: '',
     name: '',
     phone: '',
-    country: '',
     email: '',
     address: '',
   });
@@ -86,7 +85,6 @@ export default function Profile() {
         username: (user as UserType).username || '',
         name: (user as UserType).name || '',
         phone: (user as UserType).phone || '',
-        country: (user as any).country || '',
         email: (user as UserType).email || '',
         address: (user as UserType).address || '',
       });
@@ -98,7 +96,6 @@ export default function Profile() {
       username: profile.username,
       name: profile.name,
       phone: profile.phone,
-      country: profile.country,
       email: profile.email,
       address: profile.address,
     } as any);
@@ -124,7 +121,7 @@ export default function Profile() {
   const supportWhatsapp = getSetting('support_whatsapp', '');
   const supportPhone = getSetting('support_phone', '');
   const shareUrl = getSetting('share_url', '');
-  const shareText = getSetting('share_text', 'انضم إلى تطبيق طمطوم الآن!');
+  const shareText = getSetting('share_text', 'انضم إلى تطبيق واصل الآن!');
 
   const profileStats = [
     { 
@@ -137,7 +134,7 @@ export default function Profile() {
     { 
       icon: Clock, 
       label: 'عضو منذ', 
-      value: user?.createdAt ? new Date(user.createdAt).toLocaleDateString('ar-SA', { month: 'short', year: 'numeric' }) : 'جديد', 
+      value: user?.createdAt ? new Date(user.createdAt).toLocaleDateString('ar-YE', { month: 'short', year: 'numeric' }) : 'جديد', 
       color: 'text-green-500' 
     },
   ];
@@ -171,7 +168,7 @@ export default function Profile() {
       testId: 'profile-share',
       onClick: () => {
         if (navigator.share) {
-          navigator.share({ title: 'طمطوم', text: shareText, url: shareUrl });
+          navigator.share({ title: 'واصل', text: shareText, url: shareUrl });
         } else {
           toast({ title: 'نسخ الرابط', description: shareUrl });
         }
@@ -183,7 +180,10 @@ export default function Profile() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto space-y-8">
-        <h1 className="text-3xl font-black uppercase tracking-tighter border-b pb-4 mb-8">حسابي</h1>
+        <div className="flex flex-col items-center mb-8 border-b pb-6">
+          <h1 className="text-4xl font-black uppercase tracking-tighter text-primary">واصل</h1>
+          <p className="text-sm font-bold text-muted-foreground mt-1">لخدمات التوصيل</p>
+        </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
@@ -227,15 +227,6 @@ export default function Profile() {
                       />
                     </div>
                     <div>
-                      <Label htmlFor="country" className="text-foreground">الدولة</Label>
-                      <Input
-                        id="country"
-                        value={profile.country}
-                        onChange={(e) => setProfile(prev => ({ ...prev, country: e.target.value }))}
-                        placeholder="مثال: اليمن"
-                      />
-                    </div>
-                    <div>
                       <Label htmlFor="email" className="text-foreground">البريد الإلكتروني (اختياري)</Label>
                       <Input
                         id="email"
@@ -268,10 +259,6 @@ export default function Profile() {
                     <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
                       <Phone className="h-5 w-5 text-muted-foreground" />
                       <span className="text-foreground">{profile.phone}</span>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
-                      <Globe className="h-5 w-5 text-muted-foreground" />
-                      <span className="text-foreground">{profile.country || 'لم يتم تحديد الدولة'}</span>
                     </div>
                     <div className="flex items-center gap-3 p-3 bg-muted rounded-lg">
                       <Mail className="h-5 w-5 text-muted-foreground" />

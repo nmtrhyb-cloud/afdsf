@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, TrendingUp, DollarSign, ShoppingBag, Percent } from "lucide-react";
 
 export default function RestaurantReports() {
-  const { data: reports, isLoading } = useQuery({
+  const { data: reports, isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/reports/restaurants"],
   });
 
@@ -30,7 +30,7 @@ export default function RestaurantReports() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {reports?.reduce((sum: number, r: any) => sum + r.totalSales, 0).toLocaleString()} ر.س
+              {reports?.reduce((sum: number, r: any) => sum + r.totalSales, 0).toLocaleString()} ريال
             </div>
           </CardContent>
         </Card>
@@ -68,10 +68,10 @@ export default function RestaurantReports() {
                 <TableRow key={report.id}>
                   <TableCell className="font-medium">{report.name}</TableCell>
                   <TableCell>{report.totalOrders}</TableCell>
-                  <TableCell>{report.totalSales.toLocaleString()} ر.س</TableCell>
-                  <TableCell>{report.avgOrderValue.toFixed(2)} ر.س</TableCell>
+                  <TableCell>{report.totalSales.toLocaleString()} ريال</TableCell>
+                  <TableCell>{report.avgOrderValue.toFixed(2)} ريال</TableCell>
                   <TableCell>{report.commissionRate}%</TableCell>
-                  <TableCell className="text-green-600 font-bold">{report.amountDue.toLocaleString()} ر.س</TableCell>
+                  <TableCell className="text-green-600 font-bold">{report.amountDue.toLocaleString()} ريال</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -6,7 +6,8 @@ import {
   History, ShieldCheck, Banknote as BanknoteIcon,
   Briefcase as BriefcaseIcon, FileText as FileTextIcon,
   Phone as PhoneIcon, Mail as MailIcon, MapPin as MapPinIcon,
-  Shield, Key, Lock, EyeOff
+  Shield, Key, Lock, EyeOff,
+  Truck, TrendingUp, DollarSign, Link, BarChart3, ArrowLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -597,7 +598,7 @@ export default function AdminHRManagement() {
                           {employee.status === 'active' ? 'نشط' : employee.status === 'on_leave' ? 'في إجازة' : 'غير نشط'}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(employee.hireDate).toLocaleDateString('ar-SA')}</TableCell>
+                      <TableCell>{new Date(employee.hireDate).toLocaleDateString('ar-YE')}</TableCell>
                       <TableCell>{formatCurrency(employee.salary)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -643,9 +644,9 @@ export default function AdminHRManagement() {
                     return (
                       <TableRow key={record.id}>
                         <TableCell className="font-medium">{employee?.name || 'موظف سابق'}</TableCell>
-                        <TableCell>{new Date(record.date).toLocaleDateString('ar-SA')}</TableCell>
-                        <TableCell>{record.checkIn ? new Date(record.checkIn).toLocaleTimeString('ar-SA') : '-'}</TableCell>
-                        <TableCell>{record.checkOut ? new Date(record.checkOut).toLocaleTimeString('ar-SA') : '-'}</TableCell>
+                        <TableCell>{new Date(record.date).toLocaleDateString('ar-YE')}</TableCell>
+                        <TableCell>{record.checkIn ? new Date(record.checkIn).toLocaleTimeString('ar-YE') : '-'}</TableCell>
+                        <TableCell>{record.checkOut ? new Date(record.checkOut).toLocaleTimeString('ar-YE') : '-'}</TableCell>
                         <TableCell>
                           <Badge variant={record.status === 'present' ? 'default' : 'destructive'}>
                             {record.status === 'present' ? 'حاضر' : record.status === 'absent' ? 'غائب' : 'متأخر'}
@@ -695,8 +696,8 @@ export default function AdminHRManagement() {
                         <TableCell>
                           {request.type === 'annual' ? 'سنوية' : request.type === 'sick' ? 'مرضية' : 'طارئة'}
                         </TableCell>
-                        <TableCell>{new Date(request.startDate).toLocaleDateString('ar-SA')}</TableCell>
-                        <TableCell>{new Date(request.endDate).toLocaleDateString('ar-SA')}</TableCell>
+                        <TableCell>{new Date(request.startDate).toLocaleDateString('ar-YE')}</TableCell>
+                        <TableCell>{new Date(request.endDate).toLocaleDateString('ar-YE')}</TableCell>
                         <TableCell className="max-w-[200px] truncate">{request.reason}</TableCell>
                         <TableCell>
                           <Badge variant={request.status === 'approved' ? 'default' : request.status === 'pending' ? 'outline' : 'destructive'}>
@@ -735,19 +736,218 @@ export default function AdminHRManagement() {
         </TabsContent>
 
         <TabsContent value="payroll">
-          <Card>
-            <CardHeader>
-              <CardTitle>مسير الرواتب</CardTitle>
-              <CardDescription>إدارة المستحقات والرواتب الشهرية للموظفين</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12 text-muted-foreground">
-                <BanknoteIcon className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p>نظام الرواتب قيد التطوير</p>
-                <p className="text-sm">سيتم توفير تقارير الرواتب والمدفوعات قريباً</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            {/* إحصائيات الرواتب */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-blue-100 rounded-lg">
+                      <BanknoteIcon className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">إجمالي رواتب الموظفين</p>
+                      <p className="text-lg font-bold text-blue-600">
+                        {formatCurrency((employees || []).reduce((s, e) => s + (e.salary || 0), 0))}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-green-100 rounded-lg">
+                      <Users className="h-5 w-5 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">عدد الموظفين النشطين</p>
+                      <p className="text-lg font-bold text-green-600">
+                        {(employees || []).filter(e => e.status === 'active').length}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-orange-100 rounded-lg">
+                      <Truck className="h-5 w-5 text-orange-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">تكاليف السائقين</p>
+                      <p className="text-lg font-bold text-orange-600">مرتبطة بالتوصيل</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-purple-100 rounded-lg">
+                      <TrendingUp className="h-5 w-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">التكلفة الإجمالية</p>
+                      <p className="text-lg font-bold text-purple-600">
+                        {formatCurrency((employees || []).reduce((s, e) => s + (e.salary || 0), 0))}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* جدول رواتب الموظفين */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>مسير رواتب الموظفين</CardTitle>
+                    <CardDescription>رواتب الشهر الحالي للموظفين المسجلين في النظام</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <BanknoteIcon className="w-4 h-4" />
+                    تصدير كشف الرواتب
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!employees || employees.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                    <p>لا يوجد موظفون مسجلون بعد</p>
+                    <p className="text-sm mt-1">أضف موظفين من تبويب "الموظفين" لعرض مسير الرواتب</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>الموظف</TableHead>
+                        <TableHead>القسم</TableHead>
+                        <TableHead>المنصب</TableHead>
+                        <TableHead>الراتب الأساسي</TableHead>
+                        <TableHead>بدل الحضور</TableHead>
+                        <TableHead>الإجمالي</TableHead>
+                        <TableHead>الحالة</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(employees || []).filter(e => e.status === 'active').map((emp) => {
+                        const attendanceBonus = emp.attendanceRate >= 95 ? (emp.salary * 0.1) : 0;
+                        const total = emp.salary + attendanceBonus;
+                        return (
+                          <TableRow key={emp.id}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{emp.name}</p>
+                                <p className="text-xs text-muted-foreground">{emp.phone}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>{emp.department}</TableCell>
+                            <TableCell>{emp.position}</TableCell>
+                            <TableCell className="font-medium">{formatCurrency(emp.salary)}</TableCell>
+                            <TableCell className="text-green-600">
+                              {attendanceBonus > 0 ? `+${formatCurrency(attendanceBonus)}` : '-'}
+                            </TableCell>
+                            <TableCell className="font-bold text-blue-600">{formatCurrency(total)}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="bg-green-50 text-green-700">مكتمل</Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ربط مع الأقسام الأخرى */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="border-blue-200 hover:border-blue-400 transition-colors cursor-pointer">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-blue-50 rounded-lg">
+                        <Truck className="h-6 w-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">إدارة السائقين</p>
+                        <p className="text-sm text-muted-foreground">رواتب وعمولات السائقين</p>
+                      </div>
+                    </div>
+                    <ArrowLeft className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground">يتضمن: رسوم التوصيل + الحوافز</p>
+                    <Button 
+                      variant="link" 
+                      className="p-0 h-auto text-blue-600 text-xs"
+                      onClick={() => window.location.href = '/admin/drivers'}
+                    >
+                      الانتقال إلى إدارة السائقين ←
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-green-200 hover:border-green-400 transition-colors cursor-pointer">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-green-50 rounded-lg">
+                        <DollarSign className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">التقارير المالية</p>
+                        <p className="text-sm text-muted-foreground">تكاليف الموارد البشرية</p>
+                      </div>
+                    </div>
+                    <ArrowLeft className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground">رواتب الموظفين ضمن نفقات المنصة</p>
+                    <Button 
+                      variant="link" 
+                      className="p-0 h-auto text-green-600 text-xs"
+                      onClick={() => window.location.href = '/admin/financial-reports'}
+                    >
+                      الانتقال إلى التقارير المالية ←
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-purple-200 hover:border-purple-400 transition-colors cursor-pointer">
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-purple-50 rounded-lg">
+                        <BarChart3 className="h-6 w-6 text-purple-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold">أداء الفرق</p>
+                        <p className="text-sm text-muted-foreground">مؤشرات الأداء والكفاءة</p>
+                      </div>
+                    </div>
+                    <ArrowLeft className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground">تقارير الطلبات وتقييمات السائقين</p>
+                    <Button 
+                      variant="link" 
+                      className="p-0 h-auto text-purple-600 text-xs"
+                      onClick={() => window.location.href = '/admin/detailed-reports'}
+                    >
+                      عرض تقارير الأداء ←
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="sub-admins">

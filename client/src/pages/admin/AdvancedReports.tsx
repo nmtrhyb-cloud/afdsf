@@ -8,9 +8,24 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   BarChart3, LineChart, TrendingUp, TrendingDown, Download,
-  Calendar, Filter, Loader2
+  Calendar, Filter, Loader2, PieChart as PieChartIcon, Map as MapIcon, TrendingUp as TrendingIcon
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { 
+  LineChart as ReChartsLineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  BarChart as ReChartsBarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  Legend
+} from 'recharts';
 
 export default function AdvancedReports() {
   const [dateRange, setDateRange] = useState({
@@ -38,15 +53,45 @@ export default function AdvancedReports() {
   });
 
   const { data: withdrawals = [], isLoading: withdrawalLoading } = useQuery({
-    queryKey: ['/api/admin/withdrawal-requests/pending'],
+    queryKey: ['/api/admin/withdrawals/pending'],
     queryFn: async () => {
-      const response = await fetch('/api/admin/withdrawal-requests/pending');
+      const response = await fetch('/api/admin/withdrawals/pending');
       if (!response.ok) return [];
       return response.json();
     }
   });
 
+  const { data: dailyRevenue = [] } = useQuery({
+    queryKey: ['/api/admin/analytics/daily-revenue'],
+    queryFn: async () => {
+      const response = await fetch('/api/admin/analytics/daily-revenue');
+      return response.json();
+    }
+  });
+
+  const { data: retentionStats } = useQuery({
+    queryKey: ['/api/admin/analytics/customer-retention'],
+    queryFn: async () => {
+      const response = await fetch('/api/admin/analytics/customer-retention');
+      return response.json();
+    }
+  });
+
+  const { data: topAreas = [] } = useQuery({
+    queryKey: ['/api/admin/analytics/top-areas'],
+    queryFn: async () => {
+      const response = await fetch('/api/admin/analytics/top-areas');
+      return response.json();
+    }
+  });
+
   const isLoading = driverLoading || restaurantLoading || withdrawalLoading;
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+  const retentionData = retentionStats ? [
+    { name: 'عملاء عائدون', value: retentionStats.returningCustomers },
+    { name: 'عملاء جدد', value: retentionStats.newCustomers },
+  ] : [];
 
   // Calculate summaries
   const driverSummary = driverStats.reduce((acc: any, driver: any) => ({
@@ -123,11 +168,129 @@ export default function AdvancedReports() {
       </div>
 
       <Tabs value={reportType} onValueChange={setReportType}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="drivers">تقرير السائقين</TabsTrigger>
           <TabsTrigger value="restaurants">تقرير المطاعم</TabsTrigger>
           <TabsTrigger value="financial">التقارير المالية</TabsTrigger>
+          <TabsTrigger value="analytics">التحليلات الذكية</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="analytics" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {/* Sales Growth Chart */}
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingIcon className="h-5 w-5 text-primary" />
+                  نمو المبيعات (آخر 30 يوم)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ReChartsLineChart data={dailyRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis 
+                        dataKey="date" 
+                        tickFormatter={(str) => new Date(str).toLocaleDateString('ar-YE', { day: 'numeric', month: 'short' })}
+                        tick={{fontSize: 12}}
+                      />
+                      <YAxis tick={{fontSize: 12}} />
+                      <Tooltip 
+                        labelFormatter={(label) => new Date(label).toLocaleDateString('ar-YE', { dateStyle: 'long' })}
+                        formatter={(value) => [formatCurrency(value as number), 'الإيرادات']}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="amount" 
+                        stroke="#ec3714" 
+                        strokeWidth={3} 
+                        dot={{ r: 4, fill: '#ec3714' }}
+                        activeDot={{ r: 6, strokeWidth: 0 }} 
+                      />
+                    </ReChartsLineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Customer Retention Pie Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <PieChartIcon className="h-5 w-5 text-primary" />
+                  الاحتفاظ بالعملاء
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={retentionData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {retentionData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend verticalAlign="bottom" height={36}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {retentionStats && (
+                  <div className="text-center mt-4">
+                    <p className="text-sm text-muted-foreground">معدل الاحتفاظ</p>
+                    <p className="text-2xl font-bold text-primary">{retentionStats.retentionRate.toFixed(1)}%</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top Demand Areas Bar Chart */}
+            <Card className="md:col-span-3">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MapIcon className="h-5 w-5 text-primary" />
+                  المناطق الأكثر طلباً (Heatmap Data)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ReChartsBarChart data={topAreas} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" hide />
+                      <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        width={100} 
+                        tick={{fontSize: 12, fontWeight: 'bold'}}
+                      />
+                      <Tooltip formatter={(value) => [value, 'عدد الطلبات']} />
+                      <Bar 
+                        dataKey="count" 
+                        fill="#00C49F" 
+                        radius={[0, 4, 4, 0]}
+                        barSize={30}
+                      >
+                        {topAreas.map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </ReChartsBarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
         {/* Drivers Report */}
         <TabsContent value="drivers" className="space-y-6">

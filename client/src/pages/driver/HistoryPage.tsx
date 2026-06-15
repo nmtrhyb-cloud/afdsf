@@ -19,6 +19,7 @@ interface Order {
 }
 
 interface HistoryPageProps {
+  driverId?: string;
   onSelectOrder: (orderId: string) => void;
 }
 
@@ -35,7 +36,7 @@ export default function HistoryPage({ onSelectOrder }: HistoryPageProps) {
   const { data: myOrders = [], isLoading } = useQuery<Order[]>({
     queryKey: ['/api/drivers/orders', 'history'],
     queryFn: async () => {
-      const response = await fetch('/api/drivers/orders', {
+      const response = await fetch('/api/drivers/orders?status=history', {
         headers: {
           'Authorization': `Bearer ${driverToken}`
         }
@@ -48,8 +49,7 @@ export default function HistoryPage({ onSelectOrder }: HistoryPageProps) {
   });
 
   const completedOrders = myOrders.filter(order => {
-    const statusMatch = filterStatus === 'all' || order.status === filterStatus;
-    return ['delivered', 'cancelled'].includes(order.status) && statusMatch;
+    return filterStatus === 'all' || order.status === filterStatus;
   });
 
   const totalEarnings = completedOrders
