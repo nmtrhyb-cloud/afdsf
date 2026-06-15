@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Package, Clock, CheckCircle, XCircle, Eye, Loader } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { ArrowRight, Package, Clock, CheckCircle, XCircle, Eye, Loader, Star, Phone, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { formatCurrency, formatDate } from '@/lib/utils';
+import RatingDialog from '@/components/RatingDialog';
 
 interface Order {
   id: string;
@@ -24,6 +27,10 @@ interface Order {
   totalAmount: string;
   restaurantId: string;
   restaurantName?: string;
+  driverId?: string;
+  driverName?: string;
+  driverPhone?: string;
+  isRated?: boolean;
   status: 'pending' | 'confirmed' | 'preparing' | 'on_way' | 'delivered' | 'cancelled';
   createdAt: string;
   updatedAt: string;
@@ -45,31 +52,35 @@ interface OrderItem {
 export default function OrdersPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
+  const [showRatingDialog, setShowRatingDialog] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-  // Use a demo customer ID for testing - in real app this would come from authentication context
-  const customerId = 'demo-customer-id';
+  // Get customer info from user context or localStorage as fallback
+  const customerPhone = user?.phone || localStorage.getItem('customer_phone');
 
-  // Fetch orders from database
+  // Fetch orders from database using phone number
   const { data: orders = [], isLoading, error } = useQuery<Order[]>({
-    queryKey: ['orders', customerId],
+    queryKey: ['orders', customerPhone],
+    enabled: !!customerPhone,
     queryFn: async () => {
-      const response = await fetch(`/api/customers/${customerId}/orders`);
+      const response = await fetch(`/api/orders/customer/${customerPhone}`);
       if (!response.ok) {
         throw new Error('فشل في جلب الطلبات');
       }
       const data = await response.json();
       
       // Process each order to parse items and fetch restaurant name
-      const processedOrders = await Promise.all(data.map(async (order: Order) => {
+      const processedOrders = data.map((order: Order) => {
         let parsedItems: OrderItem[] = [];
         try {
-          parsedItems = JSON.parse(order.items);
+          parsedItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
         } catch (e) {
           console.error('خطأ في تحليل عناصر الطلب:', e);
         }
         
-        // Try to get restaurant name from items if not available
+        // Try to get restaurant name from order if available (from backend join)
         let restaurantName = order.restaurantName;
         if (!restaurantName && parsedItems.length > 0 && parsedItems[0].restaurantName) {
           restaurantName = parsedItems[0].restaurantName;
@@ -82,67 +93,16 @@ export default function OrdersPage() {
           restaurantName,
           parsedItems
         };
-      }));
+      });
       
       return processedOrders;
     },
     retry: 1
   });
 
-  // Mock fallback orders for demo if no orders in database
-  const fallbackOrders: Order[] = [
-    {
-      id: '1',
-      orderNumber: 'ORD001',
-      customerName: 'عميل تجريبي',
-      customerPhone: '123456789',
-      customerEmail: 'demo@example.com',
-      deliveryAddress: 'صنعاء، حي السبعين',
-      notes: 'طلب تجريبي',
-      paymentMethod: 'cash',
-      items: JSON.stringify([{ name: 'عربكة بالقشطة والعسل', quantity: 2, price: 55 }, { name: 'شاي كرك', quantity: 1, price: 8 }]),
-      subtotal: '118',
-      deliveryFee: '5',
-      total: '123',
-      totalAmount: '123',
-      restaurantId: 'demo-restaurant',
-      restaurantName: 'مطعم الزعتر الأصيل',
-      status: 'on_way' as const,
-      createdAt: new Date(Date.now() - 30 * 60000).toISOString(),
-      updatedAt: new Date(Date.now() - 30 * 60000).toISOString(),
-      estimatedTime: '25 دقيقة',
-      driverEarnings: '10',
-      customerId: 'demo-customer-id',
-      parsedItems: [{ name: 'عربكة بالقشطة والعسل', quantity: 2, price: 55 }, { name: 'شاي كرك', quantity: 1, price: 8 }]
-    },
-    {
-      id: '2',
-      orderNumber: 'ORD002',
-      customerName: 'عميل تجريبي',
-      customerPhone: '123456789',
-      customerEmail: 'demo@example.com',
-      deliveryAddress: 'صنعاء، شارع الزبيري',
-      notes: 'طلب تجريبي',
-      paymentMethod: 'cash',
-      items: JSON.stringify([{ name: 'برياني لحم', quantity: 1, price: 45 }, { name: 'سلطة يوغرت', quantity: 1, price: 12 }]),
-      subtotal: '57',
-      deliveryFee: '5',
-      total: '62',
-      totalAmount: '62',
-      restaurantId: 'demo-restaurant-2',
-      restaurantName: 'مطعم البخاري الملكي',
-      status: 'delivered' as const,
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60000).toISOString(),
-      updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60000).toISOString(),
-      estimatedTime: '30 دقيقة',
-      driverEarnings: '8',
-      customerId: 'demo-customer-id',
-      parsedItems: [{ name: 'برياني لحم', quantity: 1, price: 45 }, { name: 'سلطة يوغرت', quantity: 1, price: 12 }]
-    }
-  ];
-
-  // Use database orders if available, otherwise use fallback
-  const displayOrders = orders.length > 0 ? orders : fallbackOrders;
+  // Use database orders if available, otherwise use an empty array
+  // (removed fallbackOrders to show real data status)
+  const displayOrders = orders;
 
   const getStatusLabel = (status: string) => {
     const statusMap = {
@@ -190,6 +150,11 @@ export default function OrdersPage() {
 
   const handleViewOrder = (orderId: string) => {
     setLocation(`/orders/${orderId}`);
+  };
+
+  const handleRateOrder = (order: Order) => {
+    setSelectedOrder(order);
+    setShowRatingDialog(true);
   };
 
   const handleReorder = (order: Order) => {
@@ -316,7 +281,7 @@ export default function OrdersPage() {
                         {order.parsedItems?.map((item: OrderItem, index: number) => (
                           <div key={index} className="flex justify-between text-sm">
                             <span>{item.quantity}x {item.name}</span>
-                            <span className="font-medium">{item.price} ر.س</span>
+                            <span className="font-medium">{formatCurrency(item.price)}</span>
                           </div>
                         )) || (
                           <div className="text-sm text-gray-500">
@@ -329,10 +294,10 @@ export default function OrdersPage() {
                       <div className="border-t pt-3 space-y-2">
                         <div className="flex justify-between text-sm text-gray-600">
                           <span>عدد الأصناف: {order.parsedItems?.reduce((sum: number, item: OrderItem) => sum + item.quantity, 0) || 0}</span>
-                          <span>المجموع: {order.totalAmount} ر.س</span>
+                          <span>المجموع: {formatCurrency(order.totalAmount)}</span>
                         </div>
                         <div className="flex justify-between text-xs text-gray-500">
-                          <span>تاريخ الطلب: {new Date(order.createdAt).toLocaleDateString('ar-SA')}</span>
+                          <span>تاريخ الطلب: {formatDate(order.createdAt)}</span>
                           {order.estimatedTime && (
                             <span>الوقت المتوقع: {order.estimatedTime}</span>
                           )}
@@ -344,7 +309,7 @@ export default function OrdersPage() {
                       </div>
 
                       {/* Action Buttons */}
-                      <div className="flex gap-2 pt-2">
+                      <div className="flex flex-wrap gap-2 pt-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -356,9 +321,34 @@ export default function OrdersPage() {
                           تتبع الطلب
                         </Button>
                         
+                        {order.status === 'delivered' && !order.isRated && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="flex-1 bg-amber-500 hover:bg-amber-600"
+                            onClick={() => handleRateOrder(order)}
+                          >
+                            <Star className="w-4 h-4 mr-1" />
+                            تقييم
+                          </Button>
+                        )}
+
+                        {order.status === 'on_way' && order.driverPhone && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 border-blue-500 text-blue-500 hover:bg-blue-50"
+                            onClick={() => window.location.href = `tel:${order.driverPhone}`}
+                          >
+                            <Phone className="w-4 h-4 mr-1" />
+                            اتصال
+                          </Button>
+                        )}
+                        
                         {order.status === 'delivered' && (
                           <Button
                             size="sm"
+                            variant="outline"
                             className="flex-1"
                             onClick={() => handleReorder(order)}
                             data-testid={`button-reorder-${order.id}`}
@@ -374,6 +364,19 @@ export default function OrdersPage() {
             )}
           </TabsContent>
         </Tabs>
+
+        {selectedOrder && (
+          <RatingDialog
+            isOpen={showRatingDialog}
+            onClose={() => {
+              setShowRatingDialog(false);
+              setSelectedOrder(null);
+            }}
+            orderId={selectedOrder.id}
+            restaurantName={selectedOrder.restaurantName || "المطعم"}
+            driverName={selectedOrder.driverName}
+          />
+        )}
       </div>
     </div>
   );

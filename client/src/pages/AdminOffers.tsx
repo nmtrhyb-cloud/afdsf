@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit, Trash2, Percent, Save, X, Calendar, DollarSign } from 'lucide-react';
+import { Plus, Edit, Trash2, Percent, Save, X, Calendar, DollarSign, Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,14 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import type { SpecialOffer } from '@shared/schema';
+import type { SpecialOffer, Restaurant, Category } from '@shared/schema';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function AdminOffers() {
   const { toast } = useToast();
@@ -29,11 +36,24 @@ export default function AdminOffers() {
     minimumOrder: '0',
     validUntil: '',
     isActive: true,
+    restaurantId: '',
+    categoryId: '',
   });
 
   const { data: offers, isLoading } = useQuery<SpecialOffer[]>({
     queryKey: ['/api/admin/special-offers'],
   });
+
+  const { data: restaurantsResponse } = useQuery<{ restaurants: Restaurant[] }>({
+    queryKey: ['/api/admin/restaurants'],
+  });
+
+  const { data: categoriesData = [] } = useQuery<Category[]>({
+    queryKey: ['/api/categories'],
+  });
+
+  const restaurants = restaurantsResponse?.restaurants || [];
+  const categories = categoriesData || [];
 
   const createOfferMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -43,6 +63,8 @@ export default function AdminOffers() {
         discountAmount: data.discountAmount ? parseFloat(data.discountAmount) : null,
         minimumOrder: parseFloat(data.minimumOrder),
         validUntil: data.validUntil ? new Date(data.validUntil) : null,
+        restaurantId: data.restaurantId || null,
+        categoryId: data.categoryId || null,
       };
       const response = await apiRequest('POST', '/api/admin/special-offers', submitData);
       return response.json();
@@ -66,6 +88,8 @@ export default function AdminOffers() {
         discountAmount: data.discountAmount ? parseFloat(data.discountAmount) : null,
         minimumOrder: parseFloat(data.minimumOrder),
         validUntil: data.validUntil ? new Date(data.validUntil) : null,
+        restaurantId: data.restaurantId || null,
+        categoryId: data.categoryId || null,
       };
       const response = await apiRequest('PUT', `/api/admin/special-offers/${id}`, submitData);
       return response.json();
@@ -97,6 +121,10 @@ export default function AdminOffers() {
   });
 
   const resetForm = () => {
+    // Find Tamtoom Store and Offers Category to set as defaults
+    const tamtoomStore = restaurants.find(r => r.name.includes('طمطوم'));
+    const offersCategory = categories.find(c => c.name.includes('عرض') || c.name.includes('العروض'));
+
     setFormData({
       title: '',
       description: '',
@@ -106,9 +134,26 @@ export default function AdminOffers() {
       minimumOrder: '0',
       validUntil: '',
       isActive: true,
+      restaurantId: tamtoomStore?.id || '',
+      categoryId: offersCategory?.id || '',
     });
     setEditingOffer(null);
   };
+
+  // Set defaults when data loads for the first time
+  useState(() => {
+    if (restaurants.length > 0 && categories.length > 0 && !editingOffer) {
+      const tamtoomStore = restaurants.find(r => r.name.includes('طمطوم'));
+      const offersCategory = categories.find(c => c.name.includes('عرض') || c.name.includes('العروض'));
+      if (tamtoomStore || offersCategory) {
+        setFormData(prev => ({
+          ...prev,
+          restaurantId: prev.restaurantId || tamtoomStore?.id || '',
+          categoryId: prev.categoryId || offersCategory?.id || '',
+        }));
+      }
+    }
+  });
 
   const handleEdit = (offer: SpecialOffer) => {
     setEditingOffer(offer);
@@ -121,6 +166,8 @@ export default function AdminOffers() {
       minimumOrder: offer.minimumOrder || '0',
       validUntil: offer.validUntil ? new Date(offer.validUntil).toISOString().slice(0, 16) : '',
       isActive: offer.isActive,
+      restaurantId: offer.restaurantId || '',
+      categoryId: offer.categoryId || '',
     });
     setIsDialogOpen(true);
   };
@@ -167,31 +214,31 @@ export default function AdminOffers() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Percent className="h-8 w-8 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">إدارة العروض الخاصة</h1>
-            <p className="text-muted-foreground">إنشاء وإدارة العروض والخصومات</p>
+    <div className="flex flex-col min-h-full">
+      {/* Sticky Toolbar */}
+      <div className="sticky top-0 z-20 bg-white border-b shadow-sm">
+        <div className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <Percent className="h-7 w-7 text-primary" />
+            <div>
+              <h1 className="text-xl font-bold text-foreground">إدارة العروض الخاصة</h1>
+              <p className="text-sm text-muted-foreground">إنشاء وإدارة العروض والخصومات</p>
+            </div>
           </div>
+          <Button
+            className="gap-2"
+            onClick={() => { resetForm(); setIsDialogOpen(true); }}
+            data-testid="button-add-offer"
+          >
+            <Plus className="h-4 w-4" />
+            إضافة عرض جديد
+          </Button>
         </div>
-        
+      </div>
+
+      <div className="p-6 space-y-6">
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button 
-              className="gap-2"
-              onClick={() => {
-                resetForm();
-                setIsDialogOpen(true);
-              }}
-              data-testid="button-add-offer"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة عرض جديد
-            </Button>
-          </DialogTrigger>
+          <DialogTrigger className="hidden" />
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
@@ -206,7 +253,7 @@ export default function AdminOffers() {
                   id="title"
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="مثال: خصم 30% على جميع الوجبات"
+                  placeholder="مثال: خصم 30% على جميع المنتجات"
                   required
                   data-testid="input-offer-title"
                 />
@@ -223,6 +270,48 @@ export default function AdminOffers() {
                   required
                   data-testid="input-offer-description"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="restaurantId">المتجر المرتبط (اختياري)</Label>
+                  <Select
+                    value={formData.restaurantId || "none"}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, restaurantId: value === "none" ? "" : value }))}
+                  >
+                    <SelectTrigger id="restaurantId">
+                      <SelectValue placeholder="اختر متجراً" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">عرض عام (لكل المتاجر)</SelectItem>
+                      {restaurants.map((restaurant) => (
+                        <SelectItem key={restaurant.id} value={restaurant.id}>
+                          {restaurant.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="categoryId">التصنيف/القسم (اختياري)</Label>
+                  <Select
+                    value={formData.categoryId || "none"}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, categoryId: value === "none" ? "" : value }))}
+                  >
+                    <SelectTrigger id="categoryId">
+                      <SelectValue placeholder="اختر تصنيفاً" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">عرض عام (لكل التصنيفات)</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div>
@@ -429,7 +518,7 @@ export default function AdminOffers() {
                     <div className="flex items-center gap-1">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
                       <span className="text-xs">
-                        {new Date(offer.validUntil).toLocaleDateString('ar-YE')}
+                        {new Date(offer.validUntil).toLocaleDateString('ar-SA')}
                       </span>
                     </div>
                   )}
@@ -501,6 +590,7 @@ export default function AdminOffers() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    
   );
 }

@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useLocation } from 'wouter';
-import { ArrowRight, MapPin, Clock, Phone, CheckCircle, Truck, Package, User } from 'lucide-react';
+import { ArrowRight, MapPin, Clock, Phone, CheckCircle, Truck, Package, User, Star, MessageCircle, Map as MapIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
+import RatingDialog from '@/components/RatingDialog';
+import { DriverCommunication } from '@/components/DriverCommunication';
+import MapComponent from '@/components/maps/MapComponent';
 
 interface OrderStatus {
   id: string;
@@ -20,25 +23,93 @@ interface OrderDetails {
   customerName: string;
   customerPhone: string;
   deliveryAddress: string;
+  customerLocationLat?: string;
+  customerLocationLng?: string;
   items: any[];
   total: number;
   status: string;
   estimatedTime: string;
   driverName?: string;
   driverPhone?: string;
+  driverId?: string;
+  restaurantName?: string;
+  orderNumber: string;
   createdAt: Date;
 }
 
 export default function OrderTrackingPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const [, setLocation] = useLocation();
+  const [showRatingDialog, setShowRatingDialog] = useState(false);
+  const [hasShownRating, setHasShownRating] = useState(false);
+  const [driverLocation, setDriverLocation] = useState<[number, number] | null>(null);
   
+  // جلب إعدادات الدعم
+  const { data: uiSettings } = useQuery<any[]>({
+    queryKey: ['/api/ui-settings'],
+  });
+
+  const supportPhone = uiSettings?.find(s => s.key === 'support_phone')?.value || 'tel:+967777777777';
+  const supportWhatsapp = uiSettings?.find(s => s.key === 'support_whatsapp')?.value || 'https://wa.me/967777777777';
+
   // جلب بيانات الطلب الحقيقية من API مع تحديثات سريعة
   const { data: orderData, isLoading, error, refetch } = useQuery<{order: OrderDetails, tracking: OrderStatus[]}>({
     queryKey: [`/api/orders/${orderId}/track`],
     enabled: !!orderId,
-    refetchInterval: 5000, // تحديث كل 5 ثوانِ للحصول على تحديثات سريعة
+    refetchInterval: 10000, // Reduced polling frequency as we now have WebSockets
   });
+
+  // WebSocket support for real-time tracking
+  useEffect(() => {
+    if (!orderId) return;
+
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({
+          type: 'track_order',
+          payload: { orderId }
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'order_status_changed' || message.type === 'order_update') {
+            refetch();
+          } else if (message.type === 'driver_location' && message.payload.driverId === orderData?.order.driverId) {
+            setDriverLocation([message.payload.latitude, message.payload.longitude]);
+          }
+        } catch (err) {
+          console.error('Failed to parse WS message:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        reconnectTimeout = setTimeout(connect, 5000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (ws) ws.close();
+      clearTimeout(reconnectTimeout);
+    };
+  }, [orderId, refetch, orderData?.order.driverId]);
+
+  useEffect(() => {
+    if (orderData?.order.status === 'delivered' && !hasShownRating) {
+      setShowRatingDialog(true);
+      setHasShownRating(true);
+    }
+  }, [orderData?.order.status, hasShownRating]);
 
   if (isLoading) {
     return (
@@ -168,37 +239,50 @@ export default function OrderTrackingPage() {
           </CardContent>
         </Card>
 
-        {/* Driver Info */}
-        {order.status === 'on_way' && order.driverName && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center">
-                  <User className="h-6 w-6 text-primary-foreground" />
-                </div>
-                <div className="flex-1">
-                  <h4 className="font-medium text-foreground" data-testid="driver-name">
-                    {order.driverName}
-                  </h4>
-                  <p className="text-sm text-muted-foreground">سائق التوصيل</p>
-                </div>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  data-testid="button-call-driver"
-                >
-                  <Phone className="h-4 w-4 ml-2" />
-                  اتصال
-                </Button>
-              </div>
-              <div className="bg-muted p-3 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Truck className="h-4 w-4 text-primary" />
-                  <span className="text-sm text-foreground">السائق في الطريق إليك</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Driver Info & Map */}
+        {(['confirmed', 'preparing', 'ready', 'picked_up', 'on_way'].includes(order.status)) && order.driverId && (
+          <div className="space-y-4">
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-md flex items-center gap-2">
+                  <MapIcon className="h-4 w-4 text-primary" />
+                  تتبع الموقع المباشر
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 h-[250px] relative">
+                <MapComponent 
+                  center={driverLocation || [15.3694, 44.1910]} // Default to Sana'a if no location
+                  zoom={15}
+                  height="100%"
+                  driverPosition={driverLocation || undefined}
+                  markers={order.customerLocationLat && order.customerLocationLng ? [{
+                    position: [parseFloat(order.customerLocationLat), parseFloat(order.customerLocationLng)],
+                    title: 'موقعك',
+                    type: 'destination'
+                  }] : []}
+                />
+                {!driverLocation && (
+                  <div className="absolute inset-0 bg-black/5 flex items-center justify-center backdrop-blur-[1px] z-[400]">
+                    <div className="bg-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+                      <Loader className="h-4 w-4 animate-spin text-primary" />
+                      <span className="text-sm font-medium">في انتظار موقع السائق...</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <DriverCommunication 
+              driver={{
+                id: order.driverId || '',
+                name: order.driverName || 'سائق التوصيل',
+                phone: order.driverPhone || '',
+                isAvailable: true
+              }}
+              orderNumber={order.orderNumber}
+              customerLocation={order.deliveryAddress}
+            />
+          </div>
         )}
 
         {/* Delivery Address */}
@@ -263,7 +347,7 @@ export default function OrderTrackingPage() {
                       {status.description || status.message || 'تحديث الطلب'}
                     </p>
                     <p className="text-sm text-muted-foreground" data-testid={`timeline-time-${index}`}>
-                      {new Date(status.timestamp).toLocaleTimeString('ar-YE', { 
+                      {new Date(status.timestamp).toLocaleTimeString('ar-SA', { 
                         hour: '2-digit', 
                         minute: '2-digit' 
                       })}
@@ -277,13 +361,26 @@ export default function OrderTrackingPage() {
 
         {/* Action Buttons */}
         <div className="space-y-3">
-          <Button 
-            variant="outline" 
-            className="w-full"
-            data-testid="button-contact-support"
-          >
-            تواصل مع الدعم
-          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button 
+              variant="outline" 
+              className="w-full flex items-center justify-center gap-2 border-green-600 text-green-600 hover:bg-green-50"
+              onClick={() => window.open(supportWhatsapp, '_blank')}
+              data-testid="button-whatsapp-support"
+            >
+              <MessageCircle className="h-4 w-4" />
+              واتساب الإدارة
+            </Button>
+            <Button 
+              variant="outline" 
+              className="w-full flex items-center justify-center gap-2 border-blue-600 text-blue-600 hover:bg-blue-50"
+              onClick={() => window.location.href = supportPhone}
+              data-testid="button-call-support"
+            >
+              <Phone className="h-4 w-4" />
+              اتصال بالإدارة
+            </Button>
+          </div>
           
           {order.status !== 'delivered' && order.status !== 'cancelled' && (
             <Button 

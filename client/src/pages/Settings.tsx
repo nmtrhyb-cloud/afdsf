@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useTheme } from '../context/ThemeContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
-import { UiControlPanel } from '@/components/UiControlPanel';
 import { PermissionsManager } from '@/components/PermissionsManager';
 
 interface SettingItem {
@@ -31,6 +31,7 @@ interface SettingsGroup {
 export default function Settings() {
   const [, setLocation] = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { language, setLanguage } = useLanguage();
   const { toast } = useToast();
   
   const [settings, setSettings] = useState({
@@ -39,8 +40,7 @@ export default function Settings() {
       promotions: true,
       sound: true,
     },
-    language: 'ar',
-    currency: 'YER',
+    currency: 'SAR',
     autoLocation: true,
     biometric: false,
   });
@@ -120,12 +120,18 @@ export default function Settings() {
           label: 'اللغة',
           description: 'اختيار لغة التطبيق',
           type: 'select',
-          value: settings.language,
+          value: language,
           options: [
             { value: 'ar', label: 'العربية' },
             { value: 'en', label: 'English' },
           ],
-          onChange: (value: string) => handleSimpleSettingChange('language', value),
+          onChange: (value: 'ar' | 'en') => {
+            setLanguage(value);
+            toast({
+              title: "تم تغيير اللغة",
+              description: value === 'ar' ? "تم تحويل التطبيق للغة العربية" : "App has been switched to English",
+            });
+          },
         },
         {
           key: 'currency',
@@ -134,9 +140,7 @@ export default function Settings() {
           type: 'select',
           value: settings.currency,
           options: [
-            { value: 'YER', label: 'الريال اليمني (YER)' },
             { value: 'SAR', label: 'الريال السعودي (SAR)' },
-            { value: 'USD', label: 'الدولار الأمريكي (USD)' },
           ],
           onChange: (value: string) => handleSimpleSettingChange('currency', value),
         },
@@ -202,7 +206,7 @@ export default function Settings() {
 
       <section className="p-4">
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="general" className="flex items-center gap-2">
               <SettingsIcon className="h-4 w-4" />
               إعدادات عامة
@@ -210,10 +214,6 @@ export default function Settings() {
             <TabsTrigger value="permissions" className="flex items-center gap-2">
               <Lock className="h-4 w-4" />
               الصلاحيات
-            </TabsTrigger>
-            <TabsTrigger value="ui-control" className="flex items-center gap-2">
-              <Globe className="h-4 w-4" />
-              تحكم الواجهة
             </TabsTrigger>
           </TabsList>
           
@@ -345,10 +345,6 @@ export default function Settings() {
                 variant: granted ? 'default' : 'destructive',
               });
             }} />
-          </TabsContent>
-          
-          <TabsContent value="ui-control" className="mt-6">
-            <UiControlPanel />
           </TabsContent>
         </Tabs>
       </section>

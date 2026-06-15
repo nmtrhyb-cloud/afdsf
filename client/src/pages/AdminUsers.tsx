@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,6 +6,17 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -204,9 +215,7 @@ const AdminUsers = () => {
   };
 
   const handleDeleteUser = (user: User) => {
-    if (confirm(`هل أنت متأكد من حذف المستخدم "${user.name}"؟`)) {
-      deleteUserMutation.mutate(user.id);
-    }
+    deleteUserMutation.mutate(user.id);
   };
 
   // Filter users based on search and tab
@@ -257,13 +266,19 @@ const AdminUsers = () => {
   }
 
   return (
-    <div className="p-6" data-testid="page-admin-users">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">إدارة المستخدمين</h1>
-        <p className="text-gray-600 dark:text-gray-400">إدارة بيانات جميع مستخدمي النظام والتحكم في الصلاحيات</p>
+    <div className="flex flex-col min-h-full" data-testid="page-admin-users">
+      {/* Sticky Toolbar */}
+      <div className="sticky top-0 z-20 bg-white border-b shadow-sm">
+        <div className="flex items-center gap-3 px-6 py-4">
+          <Users className="h-7 w-7 text-primary" />
+          <div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white">إدارة المستخدمين</h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400">إدارة بيانات جميع مستخدمي النظام والتحكم في الصلاحيات</p>
+          </div>
+        </div>
       </div>
 
+      <div className="p-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="flex flex-col lg:flex-row gap-4 mb-6">
           <TabsList className="grid w-full lg:w-auto grid-cols-4">
@@ -512,6 +527,7 @@ const AdminUsers = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 };
@@ -600,15 +616,36 @@ const UsersList: React.FC<UsersListProps> = ({
                 >
                   <Edit className="h-4 w-4" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onDelete(user)}
-                  className="text-red-600 hover:text-red-700"
-                  data-testid={`button-delete-user-${user.id}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 hover:text-red-700"
+                      data-testid={`button-delete-user-${user.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>تأكيد الحذف</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        هل أنت متأكد من حذف المستخدم "{user.name}"؟ 
+                        سيتم حذف جميع بياناته المرتبطة ولن يتمكن من الدخول إلى حسابه مرة أخرى.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>إلغاء</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => onDelete(user)}
+                        className="bg-destructive hover:bg-destructive/90"
+                      >
+                        حذف
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </div>
           </CardContent>
