@@ -12,7 +12,6 @@ export default defineConfig(async () => {
     runtimeErrorOverlay(),
   ];
 
-  // Add cartographer plugin only in development on Replit
   if (process.env.NODE_ENV !== "production" && process.env.REPL_ID) {
     const { cartographer } = await import("@replit/vite-plugin-cartographer");
     plugins.push(cartographer());
@@ -31,7 +30,6 @@ export default defineConfig(async () => {
     build: {
       outDir: path.resolve(__dirname, "dist/public"),
       emptyOutDir: true,
-      // تعطيل manualChunks تماماً - هذا هو الحل الأضمن
       chunkSizeWarningLimit: 1500,
     },
     server: {
@@ -48,6 +46,16 @@ export default defineConfig(async () => {
       fs: {
         strict: false,
       },
+    },
+    // Ignore broken source maps from node_modules
+    optimizeDeps: {
+      exclude: [],
+    },
+    css: {
+      devSourcemap: false,
+    },
+    esbuild: {
+      sourcemap: false,
     },
   };
 });
