@@ -109,16 +109,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setAuthState(prev => ({ ...prev, loading: true }));
 
-      const response = await fetch('/api/auth/login', {
+      let endpoint = '/api/auth/login';
+      let body: any = { identifier, password };
+
+      if (userType === 'admin') {
+        endpoint = '/api/auth/admin/login';
+        body = { email: identifier, password };
+      } else if (userType === 'driver') {
+        endpoint = '/api/auth/driver/login';
+        body = { phone: identifier, password };
+      }
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          identifier,
-          password,
-          userType,
-        }),
+        body: JSON.stringify(body),
       });
 
       const result = await response.json();

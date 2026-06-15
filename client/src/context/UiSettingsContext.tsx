@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+
+const SETTINGS_CACHE_KEY = 'ui_settings_cache';
+const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 interface UiSetting {
   id: string;
@@ -19,13 +22,43 @@ interface UiSettingsContextType {
 
 const UiSettingsContext = createContext<UiSettingsContextType | undefined>(undefined);
 
+function loadCachedSettings(): Record<string, string> | null {
+  try {
+    const cached = localStorage.getItem(SETTINGS_CACHE_KEY);
+    if (!cached) return null;
+    const { data, timestamp } = JSON.parse(cached);
+    if (Date.now() - timestamp < SETTINGS_CACHE_TTL) {
+      return data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedSettings(settings: Record<string, string>) {
+  try {
+    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify({
+      data: settings,
+      timestamp: Date.now(),
+    }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function UiSettingsProvider({ children }: { children: React.ReactNode }) {
-  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [settings, setSettings] = useState<Record<string, string>>(() => {
+    return loadCachedSettings() || {};
+  });
   const [loading, setLoading] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadSettings = useCallback(async (isInitial = false) => {
     try {
-      const response = await fetch('/api/admin/ui-settings');
+      // Public endpoint — works for customers (no admin auth required)
+      const response = await fetch('/api/ui-settings');
       if (response.ok) {
         const settingsData: UiSetting[] = await response.json();
         const settingsMap = settingsData.reduce((acc, setting) => {
@@ -33,15 +66,56 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
           return acc;
         }, {} as Record<string, string>);
         setSettings(settingsMap);
+        saveCachedSettings(settingsMap);
       }
     } catch (error) {
-      console.error('خطأ في تحميل إعدادات الواجهة:', error);
+      // On network failure, keep cached settings - do nothing
     } finally {
       if (isInitial) {
         setLoading(false);
       }
     }
   }, []);
+
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          // Refresh settings when admin changes them
+          if (
+            message.type === 'settings_updated' ||
+            message.type === 'ui_settings_changed' ||
+            message.type === 'admin_update' ||
+            message.type === 'settings_changed'
+          ) {
+            loadSettings(false);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        // Reconnect after 10 seconds
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(connectWebSocket, 10000);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    } catch {
+      // WebSocket not available, fall back to polling
+    }
+  }, [loadSettings]);
 
   const updateSetting = async (key: string, value: string) => {
     try {
@@ -57,7 +131,9 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
       });
 
       if (response.ok) {
-        setSettings(prev => ({ ...prev, [key]: value }));
+        const newSettings = { ...settings, [key]: value };
+        setSettings(newSettings);
+        saveCachedSettings(newSettings);
       }
     } catch (error) {
       console.error('خطأ في تحديث الإعداد:', error);
@@ -80,11 +156,24 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
   };
 
   useEffect(() => {
+    // Load settings on mount (cached data shown immediately, then fetch fresh)
     loadSettings(true);
-    // تحديث الإعدادات كل 30 ثانية لاستلام التغييرات من لوحة التحكم
+
+    // Connect WebSocket for real-time updates
+    connectWebSocket();
+
+    // Periodic refresh every 30 seconds as fallback
     const interval = setInterval(() => loadSettings(false), 30000);
-    return () => clearInterval(interval);
-  }, [loadSettings]);
+
+    return () => {
+      clearInterval(interval);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [loadSettings, connectWebSocket]);
 
   return (
     <UiSettingsContext.Provider value={{
