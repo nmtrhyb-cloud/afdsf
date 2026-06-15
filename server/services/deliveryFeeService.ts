@@ -11,11 +11,11 @@
 
 import { storage } from "../storage";
 
-// ثوابت افتراضية
-const DEFAULT_BASE_FEE = 500; // رسوم أساسية
-const DEFAULT_PER_KM_FEE = 200; // رسوم لكل كيلومتر
-const DEFAULT_MIN_FEE = 3000; // الحد الأدنى
-const DEFAULT_MAX_FEE = 50000; // الحد الأقصى
+// ثوابت افتراضية (بالريال السعودي)
+const DEFAULT_BASE_FEE = 5;     // 5 ريال رسوم أساسية
+const DEFAULT_PER_KM_FEE = 2;   // 2 ريال لكل كيلومتر
+const DEFAULT_MIN_FEE = 3;      // 3 ريال حد أدنى
+const DEFAULT_MAX_FEE = 50;     // 50 ريال حد أقصى
 const EARTH_RADIUS_KM = 6371; // نصف قطر الأرض بالكيلومتر
 
 export interface DeliveryLocation {
@@ -45,8 +45,6 @@ export interface DeliveryFeeSettings {
   minFee: number;
   maxFee: number;
   freeDeliveryThreshold: number;
-  storeLat?: number;
-  storeLng?: number;
 }
 
 /**
@@ -130,26 +128,9 @@ export function estimateDeliveryTime(distanceKm: number): string {
 /**
  * جلب إعدادات رسوم التوصيل
  */
-async function getDeliveryFeeSettings(restaurantId?: string): Promise<DeliveryFeeSettings> {
+async function getDeliveryFeeSettings(): Promise<DeliveryFeeSettings> {
   try {
-    // محاولة جلب إعدادات المطعم الخاصة أولاً
-    if (restaurantId) {
-      const restaurantSettings = await storage.getDeliveryFeeSettings(restaurantId);
-      if (restaurantSettings && restaurantSettings.type) {
-        return {
-          type: restaurantSettings.type as DeliveryFeeSettings['type'],
-          baseFee: Math.max(0, parseFloat(restaurantSettings.baseFee || '0')),
-          perKmFee: Math.max(0, parseFloat(restaurantSettings.perKmFee || '0')),
-          minFee: Math.max(0, parseFloat(restaurantSettings.minFee || '0')),
-          maxFee: Math.max(DEFAULT_MIN_FEE, parseFloat(restaurantSettings.maxFee || DEFAULT_MAX_FEE.toString())),
-          freeDeliveryThreshold: Math.max(0, parseFloat(restaurantSettings.freeDeliveryThreshold || '0')),
-          storeLat: restaurantSettings.storeLat ? parseFloat(restaurantSettings.storeLat) : undefined,
-          storeLng: restaurantSettings.storeLng ? parseFloat(restaurantSettings.storeLng) : undefined
-        };
-      }
-    }
-
-    // جلب الإعدادات العامة
+    // جلب الإعدادات العامة فقط (الموقع يُجلب من المطعم مباشرة)
     const globalSettings = await storage.getDeliveryFeeSettings();
     if (globalSettings && globalSettings.type) {
       return {
@@ -157,17 +138,14 @@ async function getDeliveryFeeSettings(restaurantId?: string): Promise<DeliveryFe
         baseFee: Math.max(0, parseFloat(globalSettings.baseFee || '0')),
         perKmFee: Math.max(0, parseFloat(globalSettings.perKmFee || '0')),
         minFee: Math.max(0, parseFloat(globalSettings.minFee || '0')),
-        maxFee: Math.max(DEFAULT_MIN_FEE, parseFloat(globalSettings.maxFee || DEFAULT_MAX_FEE.toString())),
+        maxFee: Math.max(0, parseFloat(globalSettings.maxFee || DEFAULT_MAX_FEE.toString())),
         freeDeliveryThreshold: Math.max(0, parseFloat(globalSettings.freeDeliveryThreshold || '0')),
-        storeLat: globalSettings.storeLat ? parseFloat(globalSettings.storeLat) : undefined,
-        storeLng: globalSettings.storeLng ? parseFloat(globalSettings.storeLng) : undefined
       };
     }
   } catch (error) {
     console.error('Error fetching delivery fee settings:', error);
   }
 
-  console.warn('Using default delivery fee settings');
   // إعدادات افتراضية
   return {
     type: 'per_km',
@@ -188,14 +166,12 @@ export async function calculateDeliveryFee(
   restaurantId: string | null,
   orderSubtotal: number
 ): Promise<DeliveryFeeResult> {
-  // 1. جلب جميع البيانات المطلوبة بشكل متوازي
-  const [geoZones, deliveryRules, discounts, deliverySettings, storeLat, storeLng, restaurant] = await Promise.all([
+  // 1. جلب جميع البيانات المطلوبة بشكل متوازي للأداء الأمثل
+  const [geoZones, deliveryRules, discounts, deliverySettings, restaurant] = await Promise.all([
     storage.getGeoZones(),
     storage.getDeliveryRules(),
     storage.getDeliveryDiscounts(),
-    getDeliveryFeeSettings(restaurantId || undefined),
-    storage.getUiSetting('store_lat'),
-    storage.getUiSetting('store_lng'),
+    getDeliveryFeeSettings(),
     restaurantId ? storage.getRestaurant(restaurantId) : Promise.resolve(null)
   ]);
 
@@ -203,20 +179,14 @@ export async function calculateDeliveryFee(
   const activeRules = deliveryRules.filter(r => r.isActive);
   const activeDiscounts = discounts.filter(d => d.isActive);
 
-  // 2. تحديد موقع المتجر بكفاءة
+  // 2. تحديد موقع المتجر: يُستخدم موقع المطعم المحدد في قاعدة البيانات مباشرةً
   let storeLocation: DeliveryLocation = { lat: 0, lng: 0 };
   
-  if (deliverySettings.storeLat && deliverySettings.storeLng) {
-    storeLocation = { lat: deliverySettings.storeLat, lng: deliverySettings.storeLng };
-  } else if (storeLat && storeLng) {
+  if (restaurant && restaurant.latitude && restaurant.longitude) {
+    // الأولوية القصوى: موقع المطعم المحدد في إدارة المتاجر
     storeLocation = {
-      lat: parseFloat(storeLat.value),
-      lng: parseFloat(storeLng.value)
-    };
-  } else if (restaurant && restaurant.latitude && restaurant.longitude) {
-    storeLocation = {
-      lat: parseFloat(restaurant.latitude),
-      lng: parseFloat(restaurant.longitude)
+      lat: parseFloat(restaurant.latitude as string),
+      lng: parseFloat(restaurant.longitude as string)
     };
   }
 

@@ -1,11 +1,16 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import { randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
 import { dbStorage } from '../db';
 import { adminUsers, drivers, users, insertUserSchema } from '@shared/schema';
 import { eq, or, sql } from 'drizzle-orm';
 
 const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'saree1-secret-key-2026';
+
+const generateToken = (id: string, userType: 'customer' | 'driver' | 'admin') => {
+  return jwt.sign({ id, userType }, JWT_SECRET, { expiresIn: '24h' });
+};
 
 // فحص حالة الإعداد الأولي - هل توجد حسابات في قاعدة البيانات؟
 router.get('/setup-status', async (req, res) => {
@@ -120,7 +125,7 @@ router.post('/login', async (req, res) => {
       await dbStorage.db.update(users).set({ password: hashedPwd }).where(eq(users.id, user.id));
     });
 
-    const token = user.id;
+    const token = generateToken(user.id, 'customer');
     console.log('🎉 تم تسجيل الدخول بنجاح للعميل:', user.name);
     
     res.json({
@@ -158,20 +163,52 @@ router.post('/validate', async (req, res) => {
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // البحث عن المستخدم باستخدام المعرف
-    const userResult = await dbStorage.db
-      .select()
-      .from(users)
-      .where(eq(users.id, token))
-      .limit(1);
 
-    if (userResult.length === 0) {
-      // التحقق من السائقين أيضاً
+    // التحقق من التوكن وفك تشفيره
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({
+        success: false,
+        message: 'جلسة منتهية أو غير صالحة'
+      });
+    }
+
+    const userId = decoded.id;
+    const userType = decoded.userType;
+
+    // البحث عن المستخدم باستخدام المعرف ونوع المستخدم من التوكن
+    if (userType === 'customer') {
+      const userResult = await dbStorage.db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      
+      if (userResult.length > 0) {
+        const user = userResult[0];
+        if (!user.isActive) {
+          return res.status(401).json({ success: false, message: 'الحساب غير مفعل' });
+        }
+        return res.json({
+          success: true,
+          user: {
+            id: user.id,
+            name: user.name,
+            username: user.username,
+            email: user.email,
+            phone: user.phone,
+            userType: 'customer',
+            isActive: user.isActive
+          }
+        });
+      }
+    } else if (userType === 'driver') {
       const driverResult = await dbStorage.db
         .select()
         .from(drivers)
-        .where(eq(drivers.id, token))
+        .where(eq(drivers.id, userId))
         .limit(1);
       
       if (driverResult.length > 0) {
@@ -186,12 +223,11 @@ router.post('/validate', async (req, res) => {
           }
         });
       }
-
-      // التحقق من المديرين أيضاً
+    } else if (userType === 'admin') {
       const adminResult = await dbStorage.db
         .select()
         .from(adminUsers)
-        .where(eq(adminUsers.id, token))
+        .where(eq(adminUsers.id, userId))
         .limit(1);
       
       if (adminResult.length > 0) {
@@ -206,24 +242,11 @@ router.post('/validate', async (req, res) => {
           }
         });
       }
-
-      return res.status(401).json({
-        success: false,
-        message: 'جلسة غير صالحة'
-      });
     }
 
-    const user = userResult[0];
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        phone: user.phone,
-        userType: 'customer'
-      }
+    return res.status(401).json({
+      success: false,
+      message: 'مستخدم غير موجود'
     });
   } catch (error) {
     console.error('خطأ في التحقق من الرمز:', error);
@@ -238,7 +261,15 @@ router.post('/validate', async (req, res) => {
 router.post('/register', async (req, res) => {
   try {
     const validatedData = insertUserSchema.parse(req.body);
-    
+
+    // التحقق من الحد الأدنى لطول كلمة المرور
+    if (!validatedData.password || validatedData.password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل'
+      });
+    }
+
     // التحقق من وجود المستخدم مسبقاً
     const existingUser = await dbStorage.db
       .select()
@@ -267,7 +298,7 @@ router.post('/register', async (req, res) => {
       .values({ ...validatedData, password: hashedPassword })
       .returning();
 
-    const token = newUser.id;
+    const token = generateToken(newUser.id, 'customer');
 
     res.status(201).json({
       success: true,
@@ -287,6 +318,89 @@ router.post('/register', async (req, res) => {
     res.status(400).json({
       success: false,
       message: 'بيانات التسجيل غير صحيحة'
+    });
+  }
+});
+
+// تسجيل الدخول عبر التواصل الاجتماعي (Google / Apple)
+router.post('/social-login', async (req, res) => {
+  try {
+    const { provider, socialId, email, name, phone } = req.body;
+
+    if (!provider || !socialId) {
+      return res.status(400).json({
+        success: false,
+        message: 'مزود الخدمة ومعرف التواصل الاجتماعي مطلوبان'
+      });
+    }
+
+    console.log(`🔐 محاولة تسجيل دخول اجتماعي (${provider}):`, socialId);
+
+    let user;
+    
+    // 1. البحث عن المستخدم بالمعرف الاجتماعي
+    const socialQuery = provider === 'google' ? eq(users.googleId, socialId) : eq(users.appleId, socialId);
+    const existingSocialUser = await dbStorage.db.select().from(users).where(socialQuery).limit(1);
+
+    if (existingSocialUser.length > 0) {
+      user = existingSocialUser[0];
+    } else if (email) {
+      // 2. البحث عن المستخدم بالبريد الإلكتروني لربط الحساب
+      const existingEmailUser = await dbStorage.db.select().from(users).where(eq(users.email, email)).limit(1);
+      
+      if (existingEmailUser.length > 0) {
+        user = existingEmailUser[0];
+        // تحديث معرف التواصل الاجتماعي
+        const updateData: any = {};
+        if (provider === 'google') updateData.googleId = socialId;
+        if (provider === 'apple') updateData.appleId = socialId;
+        
+        await dbStorage.db.update(users).set(updateData).where(eq(users.id, user.id));
+        console.log(`🔗 تم ربط حساب ${provider} بالمستخدم الموجود:`, email);
+      }
+    }
+
+    if (!user) {
+      // 3. إنشاء مستخدم جديد
+      console.log(`🆕 إنشاء مستخدم جديد عبر ${provider}:`, name);
+      const [newUser] = await dbStorage.db.insert(users).values({
+        name: name || 'مستخدم جديد',
+        email: email || null,
+        phone: phone || '0000000000', // قيمة افتراضية إذا لم يتوفر رقم الهاتف
+        googleId: provider === 'google' ? socialId : null,
+        appleId: provider === 'apple' ? socialId : null,
+        isActive: true,
+      }).returning();
+      user = newUser;
+    }
+
+    // التحقق من حالة الحساب
+    if (!user.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: 'الحساب غير مفعل'
+      });
+    }
+
+    const token = user.id;
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        userType: 'customer'
+      },
+      message: 'تم تسجيل الدخول بنجاح'
+    });
+
+  } catch (error) {
+    console.error('خطأ في تسجيل الدخول الاجتماعي:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في الخادم'
     });
   }
 });
@@ -351,7 +465,7 @@ router.post('/admin/login', async (req, res) => {
       await dbStorage.db.update(adminUsers).set({ password: hashedPwd }).where(eq(adminUsers.id, admin.id));
     });
 
-    const token = admin.id;
+    const token = generateToken(admin.id, 'admin');
     console.log('🎉 تم تسجيل الدخول بنجاح للمدير:', admin.name);
     
     let permissions: string[] = [];
@@ -435,7 +549,7 @@ router.post('/driver/login', async (req, res) => {
       await dbStorage.db.update(drivers).set({ password: hashedPwd }).where(eq(drivers.id, driver.id));
     });
 
-    const token = driver.id;
+    const token = generateToken(driver.id, 'driver');
     console.log('🎉 تم تسجيل الدخول بنجاح للسائق:', driver.name);
     
     res.json({

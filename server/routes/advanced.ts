@@ -74,7 +74,7 @@ export function registerAdvancedRoutes(app: express.Express) {
           return {
             id: driver.id,
             name: driver.name,
-            email: driver.email || `${driver.phone}@sareeone.com`,
+            email: driver.email || `${driver.phone}@wasel.app`,
             phone: driver.phone,
             status: driver.isActive ? "active" : "inactive",
             rating: avgRating,
@@ -276,11 +276,7 @@ export function registerAdvancedRoutes(app: express.Express) {
         return res.status(400).json({ error: "Invalid amount" });
       }
 
-      const updatedBalance = await dbStorage.updateDriverBalance(driverId, { 
-        amount: parseFloat(amount), 
-        type: 'bonus' // Defaulting to bonus for manual add
-      });
-      
+      // createDriverTransaction تستدعي updateDriverBalance داخلياً - لا نستدعيه مرتين
       await dbStorage.createDriverTransaction({
         driverId,
         amount: amount.toString(),
@@ -288,11 +284,12 @@ export function registerAdvancedRoutes(app: express.Express) {
         description: description || "إضافة يدوية للرصيد"
       });
 
+      const updatedBalance = await dbStorage.getDriverBalance(driverId);
       res.json({
-        id: updatedBalance.id,
-        driverId: updatedBalance.driverId,
-        balance: updatedBalance.availableBalance,
-        totalEarned: updatedBalance.totalBalance
+        id: updatedBalance?.id,
+        driverId: updatedBalance?.driverId,
+        balance: updatedBalance?.availableBalance,
+        totalEarned: updatedBalance?.totalBalance
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -378,12 +375,7 @@ export function registerAdvancedRoutes(app: express.Express) {
       
       // Update wallet balance
       if (request.entityType === 'driver') {
-        const amount = parseFloat(request.amount.toString());
-        await dbStorage.updateDriverBalance(request.entityId, {
-          amount,
-          type: 'withdrawal'
-        });
-        
+        // createDriverTransaction تستدعي updateDriverBalance داخلياً - لا نستدعيه مرتين
         await dbStorage.createDriverTransaction({
           driverId: request.entityId,
           amount: request.amount.toString(),
@@ -635,6 +627,79 @@ export function registerAdvancedRoutes(app: express.Express) {
     } catch (error) {
       console.error("Error creating driver withdrawal request:", error);
       res.status(500).json({ error: "Failed to create withdrawal request" });
+    }
+  });
+
+  // مسارات التحليلات المتقدمة الجديدة
+  app.get("/api/admin/analytics/daily-revenue", async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const data = await advancedDb.getDailyRevenue(days);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch daily revenue" });
+    }
+  });
+
+  app.get("/api/admin/analytics/customer-retention", async (req, res) => {
+    try {
+      const data = await advancedDb.getCustomerRetentionStats();
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch retention stats" });
+    }
+  });
+
+  app.get("/api/admin/analytics/top-areas", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 5;
+      const data = await advancedDb.getTopDeliveryAreas(limit);
+      res.json(data);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch top areas" });
+    }
+  });
+
+  // مسارات التسويق الذكي
+  app.get("/api/admin/marketing/inactive-users", async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 7;
+      const users = await advancedDb.getInactiveUsers(days);
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch inactive users" });
+    }
+  });
+
+  app.post("/api/admin/marketing/send-mass-notification", async (req, res) => {
+    try {
+      const { userIds, title, message, type = "offer" } = req.body;
+
+      if (!userIds || !Array.isArray(userIds) || !title || !message) {
+        return res.status(400).json({ error: "بيانات ناقصة" });
+      }
+
+      const results = await Promise.all(
+        userIds.map(userId => 
+          dbStorage.createNotification({
+            type,
+            title,
+            message,
+            recipientType: "customer",
+            recipientId: userId,
+            isRead: false
+          })
+        )
+      );
+
+      res.json({
+        success: true,
+        message: `تم إرسال ${results.length} إشعار بنجاح`,
+        count: results.length
+      });
+    } catch (error) {
+      console.error("Error sending mass notification:", error);
+      res.status(500).json({ error: "Failed to send notifications" });
     }
   });
 }

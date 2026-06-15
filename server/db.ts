@@ -6,12 +6,12 @@ import {
   adminUsers, categories, restaurantSections, restaurants, 
   menuItems, users, customers, userAddresses, orders, specialOffers, 
   notifications, ratings, systemSettingsTable as systemSettings, drivers, orderTracking,
-  cart, favorites, employees, attendance, leaveRequests, driverWallets, driverEarningsTable,
+  cart, favorites, employees, attendance, leaveRequests, driverEarningsTable,
   driverBalances, driverTransactions, driverCommissions, driverWithdrawals,
   deliveryFeeSettings, deliveryZones, financialReports,
   geoZones, deliveryRules, deliveryDiscounts,
   messages, auditLogs, paymentGateways,
-  paymentMethods, paymentMethodDocuments, coupons, couponUsages,
+  paymentMethods, paymentMethodDocuments, coupons, couponUsages, restaurantWallets, wasalniRequests,
   type AdminUser, type InsertAdminUser,
   type Category, type InsertCategory,
   type Restaurant, type InsertRestaurant,
@@ -46,7 +46,7 @@ import {
   type CouponUsage, type InsertCouponUsage
 } from "@shared/schema";
 import { IStorage } from "./storage";
-import { eq, and, desc, sql, or, like, asc, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, or, like, asc, inArray, isNull, gte, lte, gt, lt } from "drizzle-orm";
 
 // Database connection
 let db: ReturnType<typeof drizzle> | null = null;
@@ -167,7 +167,7 @@ export class DatabaseStorage {
   async deleteAdminUser(id: string): Promise<boolean> {
     try {
       const result = await this.db.delete(adminUsers).where(eq(adminUsers.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting admin user:', error);
       throw error;
@@ -223,7 +223,7 @@ export class DatabaseStorage {
       await this.db.delete(notifications).where(and(eq(notifications.recipientId, id), eq(notifications.recipientType, 'customer')));
 
       const result = await this.db.delete(users).where(eq(users.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting user:', error);
       throw error;
@@ -259,7 +259,7 @@ export class DatabaseStorage {
       await this.db.delete(specialOffers).where(eq(specialOffers.categoryId, id));
       
       const result = await this.db.delete(categories).where(eq(categories.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting category:', error);
       throw error;
@@ -270,7 +270,7 @@ export class DatabaseStorage {
   async getMainRestaurant(): Promise<Restaurant | undefined> {
     try {
       const allRestaurants = await this.db.select().from(restaurants);
-      return allRestaurants.find(r => r.name.includes('طمطوم')) || allRestaurants[0];
+      return allRestaurants.find(r => r.name.includes('واصل')) || allRestaurants[0];
     } catch (error) {
       console.error('Error fetching main restaurant:', error);
       return undefined;
@@ -316,7 +316,7 @@ export class DatabaseStorage {
       await this.db.delete(deliveryFeeSettings).where(eq(deliveryFeeSettings.restaurantId, id));
 
       const result = await this.db.delete(restaurants).where(eq(restaurants.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting restaurant:', error);
       throw error;
@@ -324,6 +324,29 @@ export class DatabaseStorage {
   }
 
   // Menu Items
+  async getRestaurantSections(restaurantId: string): Promise<RestaurantSection[]> {
+    return await this.db
+      .select()
+      .from(restaurantSections)
+      .where(eq(restaurantSections.restaurantId, restaurantId))
+      .orderBy(restaurantSections.sortOrder);
+  }
+
+  async createRestaurantSection(section: InsertRestaurantSection): Promise<RestaurantSection> {
+    const [newSection] = await this.db.insert(restaurantSections).values(section).returning();
+    return newSection;
+  }
+
+  async updateRestaurantSection(id: string, section: Partial<InsertRestaurantSection>): Promise<RestaurantSection | undefined> {
+    const [updated] = await this.db.update(restaurantSections).set(section).where(eq(restaurantSections.id, id)).returning();
+    return updated;
+  }
+
+  async deleteRestaurantSection(id: string): Promise<boolean> {
+    const result = await this.db.delete(restaurantSections).where(eq(restaurantSections.id, id)).returning();
+    return result.length > 0;
+  }
+
   async getMenuItems(restaurantId: string): Promise<MenuItem[]> {
     if (restaurantId === 'all') {
       return await this.db.select().from(menuItems);
@@ -360,7 +383,7 @@ export class DatabaseStorage {
       await this.db.delete(specialOffers).where(eq(specialOffers.menuItemId, id));
       
       const result = await this.db.delete(menuItems).where(eq(menuItems.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting menu item:', error);
       throw error;
@@ -554,6 +577,55 @@ export class DatabaseStorage {
     return updated;
   }
 
+  // Wasalni
+  async getWasalniRequest(id: string): Promise<any | undefined> {
+    try {
+      const [request] = await this.db.select({
+        id: wasalniRequests.id,
+        requestNumber: wasalniRequests.requestNumber,
+        customerName: wasalniRequests.customerName,
+        customerPhone: wasalniRequests.customerPhone,
+        customerId: wasalniRequests.customerId,
+        fromAddress: wasalniRequests.fromAddress,
+        toAddress: wasalniRequests.toAddress,
+        fromLat: wasalniRequests.fromLat,
+        fromLng: wasalniRequests.fromLng,
+        toLat: wasalniRequests.toLat,
+        toLng: wasalniRequests.toLng,
+        orderType: wasalniRequests.orderType,
+        notes: wasalniRequests.notes,
+        status: wasalniRequests.status,
+        driverId: wasalniRequests.driverId,
+        estimatedFee: wasalniRequests.estimatedFee,
+        createdAt: wasalniRequests.createdAt,
+        updatedAt: wasalniRequests.updatedAt,
+        driverName: drivers.name,
+        driverPhone: drivers.phone,
+      })
+      .from(wasalniRequests)
+      .leftJoin(drivers, eq(wasalniRequests.driverId, drivers.id))
+      .where(eq(wasalniRequests.id, id));
+      
+      return request;
+    } catch (error) {
+      console.error('Error fetching wasalni request:', error);
+      return undefined;
+    }
+  }
+
+  async updateWasalniRequest(id: string, data: any): Promise<any | undefined> {
+    try {
+      const [updated] = await this.db.update(wasalniRequests)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(wasalniRequests.id, id))
+        .returning();
+      return updated;
+    } catch (error) {
+      console.error('Error updating wasalni request:', error);
+      return undefined;
+    }
+  }
+
   // Drivers
   async getDrivers(): Promise<Driver[]> {
     const result = await this.db.select().from(drivers);
@@ -572,6 +644,26 @@ export class DatabaseStorage {
         eq(drivers.isActive, true)
       )
     );
+  }
+
+  async getClosestDrivers(lat: number, lon: number, limit: number = 5): Promise<(Driver & { distance: number })[]> {
+    const availableDrivers = await this.getAvailableDrivers();
+    
+    const driversWithDistance = availableDrivers
+      .filter(driver => driver.latitude !== null && driver.longitude !== null)
+      .map(driver => {
+        const distance = this.calculateDistance(
+          lat,
+          lon,
+          parseFloat(driver.latitude!),
+          parseFloat(driver.longitude!)
+        );
+        return { ...driver, distance };
+      })
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, limit);
+      
+    return driversWithDistance;
   }
 
   async createDriver(driver: InsertDriver): Promise<Driver> {
@@ -596,19 +688,7 @@ export class DatabaseStorage {
         throw new Error("فشل في إنشاء السائق");
       }
 
-      // 2. إنشاء محفظة للسائق
-      try {
-        await this.db.insert(driverWallets).values({
-          driverId: newDriver.id,
-          balance: "0",
-          isActive: true
-        });
-      } catch (walletError) {
-        console.error("خطأ في إنشاء محفظة السائق:", walletError);
-        // لا نفشل العملية كاملة إذا فشل إنشاء المحفظة، لكن يفضل تسجيل الخطأ
-      }
-
-      // 3. إنشاء سجل أرباح للسائق
+      // 2. إنشاء سجل أرباح للسائق
       try {
         await this.db.insert(driverEarningsTable).values({
           driverId: newDriver.id,
@@ -620,7 +700,7 @@ export class DatabaseStorage {
         console.error("خطأ في إنشاء سجل أرباح السائق:", earningsError);
       }
 
-      // 4. إنشاء سجل رصيد للسائق (للنظام المالي المتقدم)
+      // 3. إنشاء سجل رصيد للسائق
       try {
         await this.db.insert(driverBalances).values({
           driverId: newDriver.id,
@@ -647,6 +727,18 @@ export class DatabaseStorage {
       updateData.password = await bcrypt.hash(driver.password, salt);
     }
     const [updated] = await this.db.update(drivers).set(updateData).where(eq(drivers.id, id)).returning();
+    
+    // إرسال تحديث الموقع عبر WebSocket لضمان تتبع حي في لوحة التحكم
+    if (updated && (driver.latitude || driver.longitude) && global.WS_MANAGER) {
+      global.WS_MANAGER.broadcast('driver_location', {
+        driverId: id,
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        currentLocation: updated.currentLocation,
+        timestamp: Date.now()
+      });
+    }
+
     return updated;
   }
 
@@ -661,11 +753,10 @@ export class DatabaseStorage {
       await this.db.delete(driverTransactions).where(eq(driverTransactions.driverId, id));
       await this.db.delete(driverCommissions).where(eq(driverCommissions.driverId, id));
       await this.db.delete(driverWithdrawals).where(eq(driverWithdrawals.driverId, id));
-      await this.db.delete(driverWallets).where(eq(driverWallets.driverId, id));
       await this.db.delete(driverEarningsTable).where(eq(driverEarningsTable.driverId, id));
       
       const result = await this.db.delete(drivers).where(eq(drivers.id, id));
-      return result.rowCount > 0;
+      return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
     } catch (error) {
       console.error('Error deleting driver:', error);
       throw error;
@@ -695,7 +786,7 @@ export class DatabaseStorage {
 
   async deleteSpecialOffer(id: string): Promise<boolean> {
     const result = await this.db.delete(specialOffers).where(eq(specialOffers.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Search methods - removed duplicate methods, keeping enhanced versions below
@@ -756,7 +847,7 @@ export class DatabaseStorage {
 
   async deleteUiSetting(key: string): Promise<boolean> {
     const result = await this.db.delete(systemSettings).where(eq(systemSettings.key, key));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Notifications
@@ -767,7 +858,13 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
       conditions.push(eq(notifications.recipientType, recipientType));
     }
     if (recipientId) {
-      conditions.push(eq(notifications.recipientId, recipientId));
+      conditions.push(
+        or(
+          eq(notifications.recipientId, recipientId),
+          isNull(notifications.recipientId),
+          eq(notifications.recipientId, 'all')
+        )
+      );
     }
     if (unread !== undefined) {
       conditions.push(eq(notifications.isRead, !unread));
@@ -790,6 +887,51 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
   async createNotification(notification: InsertNotification): Promise<Notification> {
     try {
       const [newNotification] = await this.db.insert(notifications).values(notification).returning();
+
+      // Notify client if WebSocket manager is available
+      if (global.WS_MANAGER) {
+        // Send based on recipient type
+        if (notification.recipientType === 'customer' || notification.recipientType === 'all' || notification.recipientType === 'flutter') {
+          if (!notification.recipientId || notification.recipientId === 'all') {
+            // Broadcast to all if it's a global notification
+            global.WS_MANAGER.broadcast('NEW_NOTIFICATION', newNotification);
+          } else {
+            // إرسال للمعرّف المحدد (UUID أو رقم هاتف)
+            global.WS_MANAGER.sendToUser(notification.recipientId, 'NEW_NOTIFICATION', newNotification);
+
+            // ضمان وصول الإشعار للعميل سواء كان متصلاً برقم الهاتف أو بمعرّف الحساب
+            // عبر استخراج المعرّف الآخر من الطلب المرتبط وإرساله أيضاً
+            if (notification.orderId) {
+              try {
+                const [orderRow] = await this.db.select({
+                  customerId: orders.customerId,
+                  customerPhone: orders.customerPhone,
+                }).from(orders).where(eq(orders.id, notification.orderId)).limit(1);
+
+                if (orderRow) {
+                  const altIds = [orderRow.customerId, orderRow.customerPhone]
+                    .filter((v): v is string => !!v && v !== notification.recipientId);
+                  for (const altId of altIds) {
+                    global.WS_MANAGER.sendToUser(altId, 'NEW_NOTIFICATION', newNotification);
+                  }
+                }
+              } catch (lookupErr) {
+                // فشل البحث عن المعرّف البديل لا يوقف العملية
+                console.error('Notification fallback lookup failed:', lookupErr);
+              }
+            }
+          }
+          // إعلام لوحة التحكم بأي إشعار عميل جديد للمراقبة العامة
+          global.WS_MANAGER.sendToAdmin('NEW_NOTIFICATION', newNotification);
+        } else if (notification.recipientType === 'driver' && notification.recipientId) {
+          global.WS_MANAGER.sendToDriver(notification.recipientId, 'NEW_NOTIFICATION', newNotification);
+          global.WS_MANAGER.sendToAdmin('NEW_NOTIFICATION', newNotification);
+        } else if (notification.recipientType === 'admin') {
+          // إرسال واحد فقط للمدير لتجنب التكرار
+          global.WS_MANAGER.sendToAdmin('NEW_NOTIFICATION', newNotification);
+        }
+      }
+
       return newNotification;
     } catch (error) {
       console.error('Error creating notification:', error);
@@ -825,39 +967,11 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async getOrderTracking(orderId: string) {
     try {
-      // For now, return mock tracking data based on order status
-      const order = await this.getOrderById(orderId);
-      if (!order) return [];
-
-      const tracking = [];
-      const baseTime = new Date(order.createdAt);
-      
-      // Create tracking entries based on order status
-      const statusFlow = ['pending', 'confirmed', 'preparing', 'ready', 'picked_up', 'on_way', 'delivered'];
-      const currentStatusIndex = statusFlow.indexOf(order.status || 'pending');
-      
-      for (let i = 0; i <= currentStatusIndex; i++) {
-        const status = statusFlow[i];
-        const messages: Record<string, string> = {
-          pending: 'تم استلام الطلب',
-          confirmed: 'تم تأكيد الطلب من المطعم',
-          preparing: 'جاري تحضير الطلب',
-          ready: 'الطلب جاهز للاستلام',
-          picked_up: 'تم استلام الطلب من المطعم',
-          on_way: 'السائق في الطريق إليك',
-          delivered: 'تم تسليم الطلب بنجاح'
-        };
-        
-        tracking.push({
-          id: `${orderId}-${i}`,
-          orderId,
-          status,
-          message: messages[status] || `تحديث الحالة إلى ${status}`,
-          createdBy: i === 0 ? 'system' : (i <= 2 ? 'restaurant' : 'driver'),
-          createdByType: i === 0 ? 'system' : (i <= 2 ? 'restaurant' : 'driver'),
-          createdAt: new Date(baseTime.getTime() + i * 5 * 60000) // 5 minutes apart
-        });
-      }
+      // Fetch actual tracking from database instead of mock data
+      const tracking = await this.db.select()
+        .from(orderTracking)
+        .where(eq(orderTracking.orderId, orderId))
+        .orderBy(asc(orderTracking.createdAt));
       
       return tracking;
     } catch (error) {
@@ -1295,12 +1409,12 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async removeFromCart(cartId: string): Promise<boolean> {
     const result = await this.db.delete(cart).where(eq(cart.id, cartId));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   async clearCart(userId: string): Promise<boolean> {
     const result = await this.db.delete(cart).where(eq(cart.userId, userId));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Favorites Functions - وظائف المفضلة
@@ -1365,7 +1479,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
     const result = await this.db.delete(favorites)
       .where(and(...conditions));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   async isRestaurantFavorite(userId: string, restaurantId: string): Promise<boolean> {
@@ -1467,7 +1581,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
           eq(userAddresses.userId, userId)
         )
       );
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Ratings
@@ -1567,7 +1681,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
     const result = await this.db.update(deliveryZones)
       .set({ isActive: false })
       .where(eq(deliveryZones.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Financial Reports
@@ -1615,7 +1729,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deleteEmployee(id: string): Promise<boolean> {
     const result = await this.db.delete(employees).where(eq(employees.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   async getAttendance(employeeId?: string, date?: Date): Promise<Attendance[]> {
@@ -1915,7 +2029,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deleteGeoZone(id: string): Promise<boolean> {
     const result = await this.db.delete(geoZones).where(eq(geoZones.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Delivery Rules methods
@@ -1940,7 +2054,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deleteDeliveryRule(id: string): Promise<boolean> {
     const result = await this.db.delete(deliveryRules).where(eq(deliveryRules.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Delivery Discounts methods
@@ -1960,7 +2074,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deleteDeliveryDiscount(id: string): Promise<boolean> {
     const result = await this.db.delete(deliveryDiscounts).where(eq(deliveryDiscounts.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // طلبات السحب (النظام المتقدم)
@@ -1990,6 +2104,99 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
       .where(eq(withdrawalRequests.id, id))
       .returning();
     return request;
+  }
+
+  // Centralized Order Completion Logic
+  async completeOrder(orderId: string): Promise<Order | undefined> {
+    try {
+      const order = await this.getOrder(orderId);
+      if (!order) return undefined;
+      if (order.status === 'delivered') return order;
+
+      // 1. Update order status
+      const [updatedOrder] = await this.db.update(orders)
+        .set({ 
+          status: 'delivered', 
+          updatedAt: new Date(),
+          actualDeliveryTime: new Date(),
+          commissionProcessed: true
+        })
+        .where(eq(orders.id, orderId))
+        .returning();
+
+      // 2. Update Driver Earnings and Balance
+      if (order.driverId) {
+        const driverEarnings = parseFloat(order.driverEarnings?.toString() || order.driverCommissionAmount?.toString() || '0');
+        
+        if (driverEarnings > 0) {
+          // ملاحظة: createDriverCommission تستدعي createDriverTransaction داخلياً
+          // والتي بدورها تستدعي updateDriverBalance - لذا لا نستدعي updateDriverBalance مباشرة
+          // لتجنب مضاعفة الرصيد
+
+          // Create Driver Commission entry (تتولى تحديث الرصيد داخلياً عبر createDriverTransaction)
+          await this.createDriverCommission({
+            driverId: order.driverId,
+            orderId: order.id,
+            orderAmount: parseFloat(order.totalAmount?.toString() || '0'),
+            commissionRate: parseFloat(order.driverCommissionRate?.toString() || '70'),
+            commissionAmount: driverEarnings,
+            status: 'approved'
+          });
+
+          // Update driver stats in drivers table
+          const driver = await this.getDriver(order.driverId);
+          if (driver) {
+            const currentEarnings = parseFloat(driver.earnings?.toString() || '0');
+            await this.updateDriver(order.driverId, {
+              completedOrders: (driver.completedOrders || 0) + 1,
+              earnings: (currentEarnings + driverEarnings).toString(),
+              isAvailable: true
+            });
+          }
+        } else {
+          // Just free the driver if no earnings
+          await this.updateDriver(order.driverId, { isAvailable: true });
+        }
+      }
+
+      // 3. Update Restaurant Earnings and Wallet
+      if (order.restaurantId) {
+        const restaurantEarnings = parseFloat(order.restaurantEarnings?.toString() || '0');
+        if (restaurantEarnings > 0) {
+          // Ensure restaurant wallet exists
+          let [rWallet] = await this.db.select().from(restaurantWallets).where(eq(restaurantWallets.restaurantId, order.restaurantId));
+          if (!rWallet) {
+            [rWallet] = await this.db.insert(restaurantWallets).values({
+              restaurantId: order.restaurantId,
+              balance: "0",
+              isActive: true
+            }).returning();
+          }
+
+          const currentBalance = parseFloat(rWallet.balance?.toString() || "0");
+          await this.db.update(restaurantWallets)
+            .set({ 
+              balance: (currentBalance + restaurantEarnings).toString(),
+              updatedAt: new Date()
+            })
+            .where(eq(restaurantWallets.restaurantId, order.restaurantId));
+        }
+      }
+
+      // 4. Create Order Tracking entry
+      await this.createOrderTracking({
+        orderId: order.id,
+        status: 'delivered',
+        message: 'تم تسليم الطلب بنجاح وتحديث الحسابات المادية',
+        createdBy: 'system',
+        createdByType: 'system'
+      });
+
+      return updatedOrder;
+    } catch (error) {
+      console.error('Error completing order:', error);
+      throw error;
+    }
   }
 
   // Chat/Messages
@@ -2049,7 +2256,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deletePaymentGateway(id: string): Promise<boolean> {
     const result = await this.db.delete(paymentGateways).where(eq(paymentGateways.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Payment Methods (Saudi payment methods)
@@ -2079,7 +2286,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
   async deletePaymentMethod(id: string): Promise<boolean> {
     await this.db.delete(paymentMethodDocuments).where(eq(paymentMethodDocuments.paymentMethodId, id));
     const result = await this.db.delete(paymentMethods).where(eq(paymentMethods.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   async getPaymentMethodDocuments(paymentMethodId: string): Promise<PaymentMethodDocument[]> {
@@ -2098,7 +2305,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
 
   async deletePaymentMethodDocument(id: string): Promise<boolean> {
     const result = await this.db.delete(paymentMethodDocuments).where(eq(paymentMethodDocuments.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   // Coupons
@@ -2112,7 +2319,9 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
   }
 
   async createCoupon(couponData: InsertCoupon): Promise<Coupon> {
-    const data = { ...couponData, code: couponData.code.toUpperCase() };
+    const data: any = { ...couponData, code: couponData.code.toUpperCase() };
+    if (data.startDate && typeof data.startDate === 'string') data.startDate = new Date(data.startDate);
+    if (data.endDate && typeof data.endDate === 'string') data.endDate = new Date(data.endDate);
     const [newCoupon] = await this.db.insert(coupons).values(data).returning();
     return newCoupon;
   }
@@ -2120,13 +2329,15 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
   async updateCoupon(id: string, couponData: Partial<InsertCoupon>): Promise<Coupon | undefined> {
     const updateData: any = { ...couponData, updatedAt: new Date() };
     if (updateData.code) updateData.code = updateData.code.toUpperCase();
+    if (updateData.startDate && typeof updateData.startDate === 'string') updateData.startDate = new Date(updateData.startDate);
+    if (updateData.endDate && typeof updateData.endDate === 'string') updateData.endDate = new Date(updateData.endDate);
     const [updated] = await this.db.update(coupons).set(updateData).where(eq(coupons.id, id)).returning();
     return updated;
   }
 
   async deleteCoupon(id: string): Promise<boolean> {
     const result = await this.db.delete(coupons).where(eq(coupons.id, id));
-    return result.rowCount > 0;
+    return (result.count ?? result.rowCount ?? result.length ?? 0) > 0;
   }
 
   async validateCoupon(code: string, orderValue: number, userId?: string, userPhone?: string): Promise<{ valid: boolean; coupon?: Coupon; discount?: number; message?: string }> {
@@ -2162,6 +2373,65 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
   }
 
   // Detailed Reports
+  async getAdminDashboardStats(): Promise<any> {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const [
+        [restaurantsCount],
+        [ordersCount],
+        [driversCount],
+        [usersCount],
+        [todayOrdersCount],
+        [pendingOrdersCount],
+        [activeDriversCount],
+        [totalRevenueResult],
+        [todayRevenueResult],
+      ] = await Promise.all([
+        this.db.select({ count: sql<number>`count(*)::int` }).from(restaurants),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(orders),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(drivers),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(users),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(orders).where(gte(orders.createdAt, today)),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(orders).where(eq(orders.status, 'pending')),
+        this.db.select({ count: sql<number>`count(*)::int` }).from(drivers).where(eq(drivers.isActive, true)),
+        this.db.select({ total: sql<number>`sum(${orders.totalAmount})::numeric` }).from(orders).where(eq(orders.status, 'delivered')),
+        this.db.select({ total: sql<number>`sum(${orders.totalAmount})::numeric` }).from(orders).where(and(eq(orders.status, 'delivered'), gte(orders.createdAt, today))),
+      ]);
+
+      const recentOrders = await this.db.select({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        customerName: orders.customerName,
+        status: orders.status,
+        totalAmount: orders.totalAmount,
+        createdAt: orders.createdAt,
+      })
+      .from(orders)
+      .orderBy(desc(orders.createdAt))
+      .limit(10);
+
+      return {
+        stats: {
+          totalRestaurants: restaurantsCount?.count || 0,
+          totalOrders: ordersCount?.count || 0,
+          totalDrivers: driversCount?.count || 0,
+          totalCustomers: usersCount?.count || 0,
+          todayOrders: todayOrdersCount?.count || 0,
+          pendingOrders: pendingOrdersCount?.count || 0,
+          activeDrivers: activeDriversCount?.count || 0,
+          totalRevenue: parseFloat(totalRevenueResult?.total?.toString() || "0"),
+          todayRevenue: parseFloat(todayRevenueResult?.total?.toString() || "0"),
+        },
+        recentOrders
+      };
+    } catch (error) {
+      console.error("Error fetching dashboard stats:", error);
+      throw error;
+    }
+  }
+
   async getDetailedReport(filters: any): Promise<any> {
     const { type, startDate, endDate } = filters || {};
     const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -2176,7 +2446,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
       preparing: 'قيد التحضير',
       ready: 'جاهز',
       picked_up: 'تم الاستلام',
-      on_the_way: 'في الطريق',
+      on_way: 'في الطريق',
       delivered: 'تم التوصيل',
       cancelled: 'ملغى',
     };
@@ -2186,7 +2456,7 @@ async getNotifications(recipientType?: string, recipientId?: string, unread?: bo
       preparing: 'bg-orange-100 text-orange-700',
       ready: 'bg-purple-100 text-purple-700',
       picked_up: 'bg-indigo-100 text-indigo-700',
-      on_the_way: 'bg-cyan-100 text-cyan-700',
+      on_way: 'bg-cyan-100 text-cyan-700',
       delivered: 'bg-green-100 text-green-700',
       cancelled: 'bg-red-100 text-red-700',
     };

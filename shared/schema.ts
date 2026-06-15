@@ -6,13 +6,14 @@ import { sql } from "drizzle-orm";
 // Users table (customers)
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  username: varchar("username", { length: 50 }).notNull().unique(),
-  password: text("password").notNull(),
+  username: varchar("username", { length: 50 }).unique(),
+  password: text("password"),
   name: text("name").notNull(),
   phone: varchar("phone", { length: 20 }).notNull(),
-  country: varchar("country", { length: 100 }),
   email: varchar("email", { length: 100 }),
   address: text("address"),
+  googleId: text("google_id"),
+  appleId: text("apple_id"),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -115,6 +116,8 @@ export const drivers = pgTable("drivers", {
   vehicleType: varchar("vehicle_type", { length: 50 }),
   vehicleNumber: varchar("vehicle_number", { length: 50 }),
   currentLocation: varchar("current_location", { length: 200 }),
+  latitude: decimal("latitude", { precision: 10, scale: 8 }),
+  longitude: decimal("longitude", { precision: 11, scale: 8 }),
   earnings: decimal("earnings", { precision: 10, scale: 2 }).default("0"),
   completedOrders: integer("completed_orders").default(0).notNull(),
   averageRating: decimal("average_rating", { precision: 3, scale: 2 }).default("0.00"), // متوسط تقييم السائق
@@ -153,6 +156,9 @@ export const orders = pgTable("orders", {
   scheduledDate: varchar("scheduled_date", { length: 50 }),
   scheduledTimeSlot: varchar("scheduled_time_slot", { length: 100 }),
   driverEarnings: decimal("driver_earnings", { precision: 10, scale: 2 }).default("0"),
+  driverCommissionRate: decimal("driver_commission_rate", { precision: 5, scale: 2 }).default("0"),
+  driverCommissionAmount: decimal("driver_commission_amount", { precision: 10, scale: 2 }).default("0"),
+  commissionProcessed: boolean("commission_processed").default(false).notNull(),
   restaurantEarnings: decimal("restaurant_earnings", { precision: 10, scale: 2 }).default("0"),
   companyEarnings: decimal("company_earnings", { precision: 10, scale: 2 }).default("0"),
   distance: decimal("distance", { precision: 10, scale: 2 }).default("0"),
@@ -161,6 +167,18 @@ export const orders = pgTable("orders", {
   restaurantPhone: varchar("restaurant_phone", { length: 20 }), // رقم هاتف المطعم للسهولة
   driverId: uuid("driver_id").references(() => drivers.id),
   isRated: boolean("is_rated").default(false).notNull(), // تمت الإضافة: هل تم تقييم الطلب
+  // حقول خدمة وصل لي
+  isWaselLi: boolean("is_wasel_li").default(false).notNull(),
+  pickupAddress: text("pickup_address"),
+  pickupLocationLat: decimal("pickup_location_lat", { precision: 10, scale: 8 }),
+  pickupLocationLng: decimal("pickup_location_lng", { precision: 11, scale: 8 }),
+  pickupPhone: varchar("pickup_phone", { length: 20 }),
+  pickupName: varchar("pickup_name", { length: 100 }),
+  waselLiItemType: varchar("wasel_li_item_type", { length: 100 }),
+  // حقول الطلبات الآجلة
+  isScheduled: boolean("is_scheduled").default(false).notNull(),
+  scheduledDateTime: timestamp("scheduled_date_time"),
+  isScheduledOrderSent: boolean("is_scheduled_order_sent").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -176,6 +194,7 @@ export const specialOffers = pgTable("special_offers", {
   minimumOrder: decimal("minimum_order", { precision: 10, scale: 2 }).default("0"),
   restaurantId: uuid("restaurant_id").references(() => restaurants.id), // ربط العرض بمطعم محدد
   categoryId: uuid("category_id").references(() => categories.id), // ربط العرض بتصنيف محدد
+  sectionId: uuid("section_id").references(() => restaurantSections.id), // ربط العرض بقسم داخل المتجر
   validUntil: timestamp("valid_until"),
   showBadge: boolean("show_badge").default(true), // إظهار أو إخفاء الملصق
   badgeText1: varchar("badge_text_1", { length: 50 }).default("طازج يومياً"), // النص الأول (مثلاً: طازج يومياً)
@@ -200,9 +219,9 @@ export const adminUsers = pgTable("admin_users", {
 });
 
 // System settings table
-export const systemSettings = pgTable("system_settings", {
+export const systemSettingsTable = pgTable("system_settings_table", {
   id: uuid("id").primaryKey().defaultRandom(),
-  key: varchar("key", { length: 100 }).notNull().unique(),
+  key: varchar("key", { length: 100 }).unique().notNull(),
   value: text("value").notNull(),
   category: varchar("category", { length: 100 }).default("general"),
   description: text("description"),
@@ -211,8 +230,9 @@ export const systemSettings = pgTable("system_settings", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// UI settings table (alias for system_settings)
-export const uiSettings = systemSettings;
+// UI settings table alias
+export const systemSettings = systemSettingsTable;
+export const uiSettings = systemSettingsTable;
 
 // Restaurant sections table
 export const restaurantSections = pgTable("restaurant_sections", {
@@ -245,8 +265,8 @@ export const notifications = pgTable("notifications", {
   title: varchar("title", { length: 200 }).notNull(),
   message: text("message").notNull(),
   recipientType: varchar("recipient_type", { length: 50 }).notNull(),
-  recipientId: text("recipient_id"),
-  orderId: uuid("order_id").references(() => orders.id),
+  recipientId: text("recipient_id"), // تم التغيير من uuid إلى text لدعم الهوية بالهاتف للمستخدمين غير المسجلين
+  orderId: uuid("order_id"),
   isRead: boolean("is_read").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -257,7 +277,7 @@ export const orderTracking = pgTable("order_tracking", {
   orderId: uuid("order_id").references(() => orders.id).notNull(),
   status: varchar("status", { length: 50 }).notNull(),
   message: text("message").notNull(),
-  createdBy: uuid("created_by").notNull(),
+  createdBy: text("created_by").notNull(), // تم التغيير من uuid إلى text لدعم "system" أو "admin" أو رقم الهاتف
   createdByType: varchar("created_by_type", { length: 50 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -281,18 +301,6 @@ export const walletTransactions = pgTable("wallet_transactions", {
   description: text("description"),
   orderId: uuid("order_id").references(() => orders.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// System settings table (removed duplicate)
-export const systemSettingsTable = pgTable("system_settings_table", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  key: varchar("key", { length: 100 }).unique().notNull(),
-  value: text("value").notNull(),
-  category: varchar("category", { length: 50 }),
-  description: text("description"),
-  isActive: boolean("is_active").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Restaurant earnings table
@@ -491,6 +499,95 @@ export const leaveRequests = pgTable("leave_requests", {
   status: varchar("status", { length: 20 }).default("pending").notNull(), // pending, approved, rejected
   reason: text("reason"),
   submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+});
+
+// ======= نظام نقاط الولاء =======
+export const loyaltyPoints = pgTable("loyalty_points", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  totalPoints: integer("total_points").default(0).notNull(),
+  redeemedPoints: integer("redeemed_points").default(0).notNull(),
+  availablePoints: integer("available_points").default(0).notNull(),
+  tier: varchar("tier", { length: 20 }).default("bronze").notNull(), // bronze, silver, gold, platinum
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const loyaltyTransactions = pgTable("loyalty_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  orderId: uuid("order_id").references(() => orders.id),
+  type: varchar("type", { length: 30 }).notNull(), // earned, redeemed, expired, bonus
+  points: integer("points").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ======= نظام التذاكر والدعم الفني =======
+export const supportTickets = pgTable("support_tickets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id),
+  customerName: varchar("customer_name", { length: 100 }).notNull(),
+  customerPhone: varchar("customer_phone", { length: 20 }).notNull(),
+  orderId: uuid("order_id").references(() => orders.id),
+  category: varchar("category", { length: 50 }).notNull(), // delivery, quality, payment, driver, other
+  subject: varchar("subject", { length: 200 }).notNull(),
+  description: text("description").notNull(),
+  status: varchar("status", { length: 30 }).default("open").notNull(), // open, in_progress, resolved, closed
+  priority: varchar("priority", { length: 20 }).default("normal").notNull(), // low, normal, high, urgent
+  assignedTo: uuid("assigned_to").references(() => adminUsers.id),
+  adminResponse: text("admin_response"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ======= نظام الإحالة والدعوة =======
+export const referralCodes = pgTable("referral_codes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
+  totalReferrals: integer("total_referrals").default(0).notNull(),
+  totalEarned: decimal("total_earned", { precision: 10, scale: 2 }).default("0").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const referralUsages = pgTable("referral_usages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  referralCodeId: uuid("referral_code_id").references(() => referralCodes.id).notNull(),
+  referrerId: uuid("referrer_id").references(() => users.id).notNull(),
+  referredUserId: uuid("referred_user_id").references(() => users.id).notNull(),
+  pointsAwarded: integer("points_awarded").default(0),
+  discountAwarded: decimal("discount_awarded", { precision: 10, scale: 2 }).default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ======= رموز الأجهزة للإشعارات =======
+export const deviceTokens = pgTable("device_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id),
+  driverId: uuid("driver_id").references(() => drivers.id),
+  token: text("token").notNull().unique(),
+  platform: varchar("platform", { length: 20 }).notNull(), // android, ios, web
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ======= بوابة المطعم الشريك =======
+export const restaurantUsers = pgTable("restaurant_users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  restaurantId: uuid("restaurant_id").references(() => restaurants.id).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  email: varchar("email", { length: 100 }).notNull().unique(),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  password: text("password").notNull(),
+  role: varchar("role", { length: 30 }).default("owner").notNull(), // owner, manager, staff
+  isActive: boolean("is_active").default(true).notNull(),
+  lastLoginAt: timestamp("last_login_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Zod schemas for validation
@@ -1230,3 +1327,53 @@ export const insertCouponUsageSchema = createInsertSchema(couponUsages).partial(
 export const selectCouponUsageSchema = createSelectSchema(couponUsages);
 export type CouponUsage = z.infer<typeof selectCouponUsageSchema>;
 export type InsertCouponUsage = z.infer<typeof insertCouponUsageSchema>;
+
+// Wasalni (وصل لي) Requests table
+export const wasalniRequests = pgTable("wasalni_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestNumber: varchar("request_number", { length: 50 }).notNull(),
+  customerName: text("customer_name").notNull(),
+  customerPhone: varchar("customer_phone", { length: 20 }).notNull(),
+  customerId: uuid("customer_id").references(() => users.id),
+  fromAddress: text("from_address").notNull(),
+  toAddress: text("to_address").notNull(),
+  fromLat: decimal("from_lat", { precision: 10, scale: 8 }),
+  fromLng: decimal("from_lng", { precision: 11, scale: 8 }),
+  toLat: decimal("to_lat", { precision: 10, scale: 8 }),
+  toLng: decimal("to_lng", { precision: 11, scale: 8 }),
+  orderType: varchar("order_type", { length: 100 }).default("طعام"),
+  notes: text("notes"),
+  scheduledDate: varchar("scheduled_date", { length: 20 }),
+  scheduledTime: varchar("scheduled_time", { length: 20 }),
+  estimatedFee: decimal("estimated_fee", { precision: 10, scale: 2 }),
+  status: varchar("status", { length: 30 }).default("pending").notNull(),
+  driverId: uuid("driver_id").references(() => drivers.id),
+  cancelReason: text("cancel_reason"),
+  adminNotes: text("admin_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertWasalniRequestSchema = createInsertSchema(wasalniRequests).partial({
+  id: true,
+  requestNumber: true,
+  customerId: true,
+  fromLat: true,
+  fromLng: true,
+  toLat: true,
+  toLng: true,
+  orderType: true,
+  notes: true,
+  scheduledDate: true,
+  scheduledTime: true,
+  estimatedFee: true,
+  status: true,
+  driverId: true,
+  cancelReason: true,
+  adminNotes: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const selectWasalniRequestSchema = createSelectSchema(wasalniRequests);
+export type WasalniRequest = z.infer<typeof selectWasalniRequestSchema>;
+export type InsertWasalniRequest = z.infer<typeof insertWasalniRequestSchema>;

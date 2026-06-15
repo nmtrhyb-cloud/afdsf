@@ -12,10 +12,12 @@ const defaultUiSettings = [
   { key: "show_delivery_app", value: "true", category: "navigation", description: "عرض تطبيق التوصيل" },
   { key: "show_hero_section", value: "true", category: "navigation", description: "عرض البانر الرئيسي المتحرك" },
   { key: "show_featured_products", value: "true", category: "navigation", description: "عرض المنتجات المميزة" },
+  { key: "show_wasalni_service", value: "true", category: "navigation", description: "عرض خدمة وصل لي في الصفحة الرئيسية" },
+  { key: "wasalni_base_fee", value: "5", category: "delivery", description: "رسوم خدمة وصل لي الأساسية" },
   { key: "bottom_bar_enabled", value: "true", category: "navigation", description: "إظهار شريط التنقل السفلي" },
   // إعدادات عامة
-  { key: "app_name", value: "طمطوم للتوصيل", category: "general", description: "اسم التطبيق" },
-  { key: "app_theme", value: "#16a34a", category: "general", description: "اللون الأساسي للتطبيق (hex)" },
+  { key: "app_name", value: "واصل", category: "general", description: "اسم التطبيق" },
+  { key: "app_theme", value: "#ec3714", category: "general", description: "اللون الأساسي للتطبيق (hex)" },
   { key: "delivery_fee_default", value: "5", category: "general", description: "رسوم التوصيل الافتراضية (ريال)" },
   { key: "minimum_order_default", value: "25", category: "general", description: "الحد الأدنى لقيمة الطلب (ريال)" },
   // إعدادات التوصيل
@@ -33,7 +35,20 @@ const defaultUiSettings = [
   { key: "sidebar_image_url", value: "", category: "branding", description: "صورة خلفية القائمة الجانبية" },
   { key: "sidebar_logo_url", value: "", category: "branding", description: "شعار القائمة الجانبية (إذا كان مختلفاً عن شعار الهيدر)" },
   { key: "show_sidebar_logo", value: "true", category: "branding", description: "إظهار شعار القائمة الجانبية" },
-  { key: "sidebar_tagline", value: "كل ما تحتاجونه في مكان واحد", category: "branding", description: "الشعار النصي في القائمة الجانبية" },
+  { key: "sidebar_tagline", value: "خدمة التوصيل الأسرع في المملكة", category: "branding", description: "الشعار النصي في القائمة الجانبية" },
+  { key: "address_text", value: "أختار العنوان", category: "branding", description: "نص عنوان الموقع في الشريط العلوي" },
+  // إعدادات الشاشة الرئيسية - بانر العروض
+  { key: "offer_banner_1_title", value: "عروض حصرية يومية للتوصيل", category: "home", description: "عنوان البانر الأول" },
+  { key: "offer_banner_1_subtitle", value: "اطلب الآن واستمتع بأسرع توصيل", category: "home", description: "نص البانر الأول" },
+  { key: "offer_banner_2_title", value: "اكتشف أحدث العروض والخصومات", category: "home", description: "عنوان البانر الثاني" },
+  { key: "offer_banner_2_subtitle", value: "خصومات حصرية على الطلبات", category: "home", description: "نص البانر الثاني" },
+  // إعدادات أزرار التصنيف والصفحة الرئيسية
+  { key: "btn_tab_all", value: "الكل", category: "home", description: "نص تبويب كل المطاعم" },
+  { key: "btn_tab_nearest", value: "الأقرب", category: "home", description: "نص تبويب الأقرب" },
+  { key: "btn_tab_new", value: "الجديدة", category: "home", description: "نص تبويب الجديدة" },
+  { key: "btn_tab_favorites", value: "المفضلة", category: "home", description: "نص تبويب المفضلة" },
+  { key: "btn_shop_now", value: "تسوق الآن", category: "home", description: "نص زر التسوق" },
+  { key: "text_all_categories", value: "كل التصنيفات", category: "home", description: "نص زر كل التصنيفات" },
   { key: "app_version", value: "1.0.0", category: "general", description: "إصدار التطبيق" },
   { key: "top_bar_logo_url", value: "", category: "branding", description: "شعار الشريط العلوي الثانوي" },
   { key: "logo_animation_duration", value: "2.5", category: "branding", description: "مدة ظهور الشعار (ثواني)" },
@@ -41,7 +56,7 @@ const defaultUiSettings = [
   { key: "show_splash_screen", value: "true", category: "splash", description: "عرض شاشة الترحيب" },
   { key: "splash_image_url", value: "", category: "splash", description: "صورة شاشة الترحيب" },
   { key: "splash_image_url_2", value: "", category: "splash", description: "صورة إضافية للترحيب" },
-  { key: "splash_title", value: "طمطوم", category: "splash", description: "عنوان شاشة الترحيب" },
+  { key: "splash_title", value: "واصل", category: "splash", description: "عنوان شاشة الترحيب" },
   { key: "splash_subtitle", value: "أفضل الخضار والفواكه الطازجة توصل لبابك", category: "splash", description: "نص الترحيب" },
   { key: "splash_button_text", value: "ابدأ الآن", category: "splash", description: "نص زر البداية" },
   // إعدادات الدعم والتواصل
@@ -52,20 +67,28 @@ const defaultUiSettings = [
   // إعدادات المشاركة والقائمة الجانبية
   { key: "show_share_button", value: "true", category: "sidebar", description: "إظهار زر المشاركة في القائمة" },
   { key: "show_contact_button", value: "true", category: "sidebar", description: "إظهار زر التواصل في القائمة" },
-  { key: "share_text", value: "جرب تطبيق طمطوم الآن!", category: "sidebar", description: "نص المشاركة" },
+  { key: "share_text", value: "جرب واصل الآن!", category: "sidebar", description: "نص المشاركة" },
   { key: "share_url", value: "", category: "sidebar", description: "رابط المشاركة" },
   // إعدادات الخصوصية
   { key: "show_privacy_button", value: "true", category: "privacy", description: "إظهار زر سياسة الخصوصية" },
   { key: "privacy_policy_text", value: "", category: "privacy", description: "نص سياسة الخصوصية" },
   // إعدادات السلة والدفع
   { key: "show_payment_cards", value: "true", category: "cart", description: "إظهار بطاقات الدفع في السلة" },
-  { key: "show_coupon_box_always", value: "false", category: "cart", description: "إظهار صندوق الكوبون دائمًا" },
+  { key: "show_coupon_box_always", value: "true", category: "cart", description: "إظهار صندوق الكوبون دائمًا" },
+  { key: "coupon_min_order_value", value: "0", category: "cart", description: "الحد الأدنى لقيمة الطلب لإظهار صندوق الكوبون (0 = دائماً)" },
+  { key: "show_cash_payment", value: "true", category: "cart", description: "إظهار خيار الدفع نقداً" },
+  { key: "show_bank_transfer", value: "false", category: "cart", description: "إظهار خيار التحويل البنكي" },
   { key: "cart_checkout_button_text", value: "تأكيد الطلب", category: "cart", description: "نص زر الدفع" },
+  { key: "cart_checkout_note", value: "", category: "cart", description: "رسالة تحت زر التأكيد" },
   // إعدادات تطبيق السائق - إظهار/إخفاء الصفحات
   { key: "driver_show_wallet", value: "true", category: "driver", description: "إظهار صفحة المحفظة للسائق" },
   { key: "driver_show_stats", value: "true", category: "driver", description: "إظهار صفحة الإحصائيات للسائق" },
   { key: "driver_show_profile", value: "true", category: "driver", description: "إظهار صفحة الملف الشخصي للسائق" },
   { key: "driver_show_history", value: "true", category: "driver", description: "إظهار سجل التوصيل للسائق" },
+  // إعدادات ساعات عمل الموصلين والطلبات المؤجلة
+  { key: "driver_start_time", value: "09:00", category: "driver", description: "وقت بدء دوام الموصلين (مثال: 09:00)" },
+  { key: "driver_end_time", value: "21:00", category: "driver", description: "وقت انتهاء دوام الموصلين (مثال: 21:00)" },
+  { key: "enable_scheduled_orders", value: "true", category: "driver", description: "السماح للعملاء بجدولة الطلبات خارج ساعات الموصلين" },
 ];
 
 // ضمان وجود الإعدادات الافتراضية في قاعدة البيانات (لكل تشغيل)
@@ -119,7 +142,7 @@ export async function seedDefaultData() {
     // Seed restaurants
     const restaurants = [
       {
-        name: "متجر طمطوم",
+        name: "متجر واصل",
         description: "أجود أنواع الفواكه والخضروات الطازجة يومياً",
         image: "https://images.unsplash.com/photo-1542838132-92c53300491e?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&h=400",
         phone: "+967777777777",

@@ -9,6 +9,7 @@ import { calculateDeliveryFee, calculateDistance, estimateDeliveryTime } from ".
 import { deliveryFeeCache } from "../utils/cache";
 import { z } from "zod";
 import { coerceRequestData } from "../utils/coercion";
+import { broadcastSettingsChanged } from "../broadcast";
 import { 
   insertGeoZoneSchema, 
   insertDeliveryRuleSchema, 
@@ -133,8 +134,6 @@ router.post("/settings", async (req, res) => {
       minFee: z.string().optional(),
       maxFee: z.string().optional(),
       freeDeliveryThreshold: z.string().optional(),
-      storeLat: z.string().optional(),
-      storeLng: z.string().optional(),
       restaurantId: z.string().optional()
     });
 
@@ -169,8 +168,6 @@ router.post("/settings", async (req, res) => {
       minFee: validateNumber(validatedData.minFee, 'الحد الأدنى'),
       maxFee: validateNumber(validatedData.maxFee, 'الحد الأقصى'),
       freeDeliveryThreshold: validateNumber(validatedData.freeDeliveryThreshold, 'حد التوصيل المجاني'),
-      storeLat: validatedData.storeLat ? validateNumber(validatedData.storeLat, 'خط العرض') : undefined,
-      storeLng: validatedData.storeLng ? validateNumber(validatedData.storeLng, 'خط الطول') : undefined,
     };
 
     console.log('🧹 البيانات بعد التنظيف:', JSON.stringify(sanitizedData, null, 2));
@@ -209,7 +206,10 @@ router.post("/settings", async (req, res) => {
     if (existing) {
       console.log(`📝 تحديث الإعدادات الموجودة: ${existing.id}`);
       const updated = await storage.updateDeliveryFeeSettings(existing.id, sanitizedData);
-      console.log(`✅ تم التحديث بنجاح:`, JSON.stringify(updated, null, 2));
+      console.log(`✅ تم التحديث بنجاح`);
+      // مسح كاش رسوم التوصيل وإرسال broadcast للتحديث الفوري
+      deliveryFeeCache.clear();
+      broadcastSettingsChanged('delivery_fee_settings');
       return res.json({ 
         success: true, 
         message: 'تم تحديث الإعدادات بنجاح',
@@ -219,7 +219,10 @@ router.post("/settings", async (req, res) => {
 
     console.log(`✨ إنشاء إعدادات جديدة`);
     const newSettings = await storage.createDeliveryFeeSettings(sanitizedData);
-    console.log(`✅ تم الإنشاء بنجاح:`, JSON.stringify(newSettings, null, 2));
+    console.log(`✅ تم الإنشاء بنجاح`);
+    // مسح كاش رسوم التوصيل وإرسال broadcast للتحديث الفوري
+    deliveryFeeCache.clear();
+    broadcastSettingsChanged('delivery_fee_settings');
     res.status(201).json({ 
       success: true, 
       message: 'تم حفظ الإعدادات بنجاح',

@@ -1,6 +1,7 @@
 import { 
   type Category, type InsertCategory,
   type Restaurant, type InsertRestaurant,
+  type RestaurantSection, type InsertRestaurantSection,
   type MenuItem, type InsertMenuItem,
   type Order, type InsertOrder,
   type Driver, type InsertDriver,
@@ -55,6 +56,12 @@ export interface IStorage {
   updateRestaurant(id: string, restaurant: Partial<InsertRestaurant>): Promise<Restaurant | undefined>;
   deleteRestaurant(id: string): Promise<boolean>;
 
+  // Restaurant Sections
+  getRestaurantSections(restaurantId: string): Promise<RestaurantSection[]>;
+  createRestaurantSection(section: InsertRestaurantSection): Promise<RestaurantSection>;
+  updateRestaurantSection(id: string, section: Partial<InsertRestaurantSection>): Promise<RestaurantSection | undefined>;
+  deleteRestaurantSection(id: string): Promise<boolean>;
+
   // Menu Items
   getMenuItems(restaurantId: string): Promise<MenuItem[]>;
   getAllMenuItems(): Promise<MenuItem[]>;
@@ -71,12 +78,17 @@ export interface IStorage {
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrder(id: string, order: Partial<InsertOrder>): Promise<Order | undefined>;
 
+  // Wasalni
+  getWasalniRequest(id: string): Promise<any | undefined>;
+  updateWasalniRequest(id: string, data: any): Promise<any | undefined>;
+
   // Drivers
   getDrivers(): Promise<Driver[]>;
   getAllDrivers(): Promise<Driver[]>;
   getDriver(id: string): Promise<Driver | undefined>;
   getDriverById(id: string): Promise<Driver | undefined>;
   getAvailableDrivers(): Promise<Driver[]>;
+  getClosestDrivers(lat: number, lon: number, limit?: number): Promise<(Driver & { distance: number })[]>;
   createDriver(driver: InsertDriver): Promise<Driver>;
   updateDriver(id: string, driver: Partial<InsertDriver>): Promise<Driver | undefined>;
   deleteDriver(id: string): Promise<boolean>;
@@ -138,6 +150,7 @@ export interface IStorage {
 
   // Enhanced notification methods
   getNotifications(recipientType?: string, recipientId?: string, unread?: boolean): Promise<Notification[]>;
+  markNotificationAsRead(id: string): Promise<Notification | undefined>;
 
   // Search methods
   searchRestaurants(query: string, category?: string): Promise<Restaurant[]>;
@@ -262,6 +275,7 @@ export interface IStorage {
   deletePaymentMethodDocument(id: string): Promise<boolean>;
 
   // Reporting
+  getAdminDashboardStats(): Promise<any>;
   getDetailedReport(filters: any): Promise<any>;
 }
 
@@ -914,6 +928,22 @@ export class MemStorage implements IStorage {
     return this.restaurants.delete(id);
   }
 
+  async getRestaurantSections(restaurantId: string): Promise<RestaurantSection[]> {
+    return [];
+  }
+
+  async createRestaurantSection(section: InsertRestaurantSection): Promise<RestaurantSection> {
+    return section as RestaurantSection;
+  }
+
+  async updateRestaurantSection(id: string, section: Partial<InsertRestaurantSection>): Promise<RestaurantSection | undefined> {
+    return undefined;
+  }
+
+  async deleteRestaurantSection(id: string): Promise<boolean> {
+    return false;
+  }
+
   // Menu Items
   async getMenuItems(restaurantId: string): Promise<MenuItem[]> {
     return Array.from(this.menuItems.values()).filter(item => item.restaurantId === restaurantId);
@@ -1002,6 +1032,14 @@ export class MemStorage implements IStorage {
     const updated = { ...existing, ...order };
     this.orders.set(id, updated);
     return updated;
+  }
+
+  async getWasalniRequest(id: string): Promise<any | undefined> {
+    return undefined; // Not implemented for MemStorage
+  }
+
+  async updateWasalniRequest(id: string, data: any): Promise<any | undefined> {
+    return undefined; // Not implemented for MemStorage
   }
 
   // Drivers مع الحقول الجديدة
@@ -1428,6 +1466,22 @@ export class MemStorage implements IStorage {
       createdAt: new Date()
     };
     this.notifications.set(id, newNotification);
+
+    // Notify client if WebSocket manager is available
+    if (global.WS_MANAGER) {
+      // Send based on recipient type
+      if (notification.recipientType === 'customer' && notification.recipientId) {
+        global.WS_MANAGER.sendToUser(notification.recipientId, 'NEW_NOTIFICATION', newNotification);
+      } else if (notification.recipientType === 'driver' && notification.recipientId) {
+        global.WS_MANAGER.sendToDriver(notification.recipientId, 'NEW_NOTIFICATION', newNotification);
+      } else if (notification.recipientType === 'admin') {
+        global.WS_MANAGER.sendToAdmin('NEW_NOTIFICATION', newNotification);
+      }
+      
+      // Always notify admin about all notifications for visibility
+      global.WS_MANAGER.sendToAdmin('NEW_NOTIFICATION', newNotification);
+    }
+
     return newNotification;
   }
 

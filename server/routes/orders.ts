@@ -4,6 +4,7 @@ import { calculateDeliveryFee } from "../services/deliveryFeeService";
 import { formatCurrency } from "../../shared/utils";
 import { canOrderFromRestaurant } from "../../utils/restaurantHours";
 import { randomUUID } from "crypto";
+import { requireAdminAuth } from "../utils/auth-middleware";
 
 const router = express.Router();
 
@@ -35,6 +36,78 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ 
         error: "بيانات ناقصة: الاسم، الهاتف، العنوان، والعناصر مطلوبة"
       });
+    }
+
+    // منع تكرار الطلب (خلال آخر 60 ثانية)
+    try {
+      const recentOrders = await storage.getOrdersByCustomer(customerPhone);
+      const sixtySecondsAgo = new Date(Date.now() - 60 * 1000);
+      const incomingTotal = parseFloat(String(totalAmount));
+      
+      const isDuplicate = recentOrders.some(order => {
+        const orderTime = new Date(order.createdAt);
+        const orderTotal = parseFloat(order.totalAmount);
+        return orderTime > sixtySecondsAgo && 
+               Math.abs(orderTotal - incomingTotal) < 0.01 &&
+               order.status !== 'cancelled';
+      });
+
+      if (isDuplicate) {
+        return res.status(400).json({ 
+          error: "لقد قمت بإرسال طلب مماثل مؤخراً، يرجى الانتظار دقيقة واحدة أو التحقق من قائمة طلباتك للتأكد من وصول الطلب"
+        });
+      }
+    } catch (err) {
+      console.error("خطأ في التحقق من الطلبات المتكررة:", err);
+    }
+
+    // التحقق من ساعات عمل التطبيق العالمية
+    // الطلبات المؤجلة (scheduled) تتجاوز فحص ساعات الموصلين لكن لا تتجاوز إغلاق المتجر الإداري
+    const isScheduledOrder = deliveryPreference === 'scheduled';
+
+    try {
+      const allSettings = await storage.getUiSettings();
+      const settingsMap = new Map(allSettings.map((s: any) => [s.key, s.value]));
+      const storeStatus = settingsMap.get('store_status');
+      const openingTime = settingsMap.get('opening_time') || '08:00';
+      const closingTime = settingsMap.get('closing_time') || '23:00';
+      const allowScheduledWhenClosed = settingsMap.get('allow_scheduled_orders_when_closed') !== 'false';
+
+      if (storeStatus === 'closed') {
+        // التحقق من الإعداد إذا كان مسموحاً بالطلبات المجدولة عند إغلاق التطبيق
+        if (!isScheduledOrder || !allowScheduledWhenClosed) {
+          return res.status(400).json({ 
+            error: "التطبيق مغلق حالياً من قِبل الإدارة",
+            code: "APP_CLOSED",
+            message: "التطبيق مغلق حالياً من قِبل الإدارة"
+          });
+        }
+        // الطلبات المجدولة مسموح بها فقط إذا كان الإعداد مفعلاً
+      }
+
+      // إذا كان المتجر مفتوحاً يدوياً، نتجاوز فحص الوقت تماماً
+      if (storeStatus === 'open') {
+        // المتجر مفتوح يدوياً - لا فحص للوقت
+      } else if (!isScheduledOrder) {
+        // الطلبات المؤجلة لا تحتاج فحص ساعات العمل الحالية
+        const now = new Date();
+        const currentTime = now.toTimeString().slice(0, 5);
+        const timeToMinutes = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const current = timeToMinutes(currentTime);
+        const open = timeToMinutes(openingTime);
+        const close = timeToMinutes(closingTime);
+        let appIsOpen = close > open ? (current >= open && current < close) : (current >= open || current < close);
+
+        if (!appIsOpen) {
+          const isBeforeOpen = current < open;
+          const whenOpen = isBeforeOpen ? `يفتح اليوم الساعة ${openingTime}` : `يفتح غداً الساعة ${openingTime}`;
+          return res.status(400).json({ 
+            error: `التطبيق مغلق حالياً. ${whenOpen}`
+          });
+        }
+      }
+    } catch (_) {
+      // إذا فشل التحقق من الإعدادات، نسمح بالطلب
     }
 
     // التحقق من وجود المطعم (اختياري الآن)
@@ -93,7 +166,7 @@ router.post("/", async (req, res) => {
     let restaurantEarnings = 0;
     
     if (restaurant) {
-      const restaurantCommissionRate = parseFloat(restaurant.commissionRate?.toString() || '10'); // افتراضي 10%
+      const restaurantCommissionRate = parseFloat(restaurant.commissionRate?.toString() || '15'); // افتراضي 15%
       restaurantCommissionAmount = (subtotalNum * restaurantCommissionRate) / 100;
       restaurantEarnings = subtotalNum - restaurantCommissionAmount;
     } else {
@@ -108,6 +181,7 @@ router.post("/", async (req, res) => {
     const companyEarnings = restaurantCommissionAmount + (deliveryFeeNum - driverEarnings);
 
     // إنشاء الطلب
+    const orderStatus = isScheduledOrder ? 'scheduled' : 'pending';
     const orderData = {
       orderNumber,
       customerName: customerName.trim(),
@@ -119,7 +193,7 @@ router.post("/", async (req, res) => {
       customerLocationLng: customerLocationLng ? String(customerLocationLng) : null,
       notes: notes ? notes.trim() : null,
       paymentMethod: paymentMethod || 'cash',
-      status: 'pending',
+      status: orderStatus,
       items: itemsString,
       subtotal: String(subtotalNum),
       deliveryFee: String(deliveryFeeNum),
@@ -155,21 +229,42 @@ router.post("/", async (req, res) => {
       }
       
       // إشعار للإدارة فقط - السائقون سيتلقون إشعار عند تعيينهم للطلب
+      const adminNotifTitle = isScheduledOrder ? 'طلب مجدول جديد' : 'طلب جديد في انتظار التعيين';
+      const adminNotifMsg = isScheduledOrder
+        ? `طلب مجدول رقم ${orderNumber} من ${customerName}. موعد التوصيل: ${req.body.scheduledDate} ${req.body.scheduledTimeSlot}`
+        : `طلب جديد رقم ${orderNumber} من ${customerName} في انتظار تعيين سائق. الموقع: ${deliveryAddress}`;
       await storage.createNotification({
-        type: 'new_order_pending_assignment',
-        title: 'طلب جديد في انتظار التعيين',
-        message: `طلب جديد رقم ${orderNumber} من ${customerName} في انتظار تعيين سائق. الموقع: ${deliveryAddress}`,
+        type: isScheduledOrder ? 'new_scheduled_order' : 'new_order_pending_assignment',
+        title: adminNotifTitle,
+        message: adminNotifMsg,
         recipientType: 'admin',
         recipientId: null,
         orderId: order.id,
         isRead: false
       });
 
+      // إشعار للعميل بتأكيد استلام الطلب
+      if (customerId || customerPhone) {
+        await storage.createNotification({
+          type: 'order_status_update',
+          title: isScheduledOrder ? 'تم جدولة طلبك' : 'تم استلام طلبك',
+          message: isScheduledOrder 
+            ? `تم جدولة طلبك رقم ${orderNumber} للتوصيل في ${req.body.scheduledDate} ${req.body.scheduledTimeSlot}`
+            : `تم استلام طلبك رقم ${orderNumber} وهو قيد المراجعة حالياً`,
+          recipientType: 'customer',
+          recipientId: customerId || customerPhone,
+          orderId: order.id,
+          isRead: false
+        });
+      }
+
       // تتبع الطلب
       await storage.createOrderTracking({
         orderId: order.id,
-        status: 'pending',
-        message: 'تم استلام الطلب وجاري المراجعة',
+        status: orderStatus,
+        message: isScheduledOrder
+          ? `تم جدولة الطلب للتوصيل في ${req.body.scheduledDate} ${req.body.scheduledTimeSlot}`
+          : 'تم استلام الطلب وجاري المراجعة',
         createdBy: 'system',
         createdByType: 'system'
       });
@@ -302,7 +397,7 @@ router.put("/:id/assign-driver", async (req, res) => {
     
     if (restaurantId) {
       restaurant = await storage.getRestaurant(restaurantId);
-      const restaurantCommissionRate = parseFloat(restaurant?.commissionRate?.toString() || '10');
+      const restaurantCommissionRate = parseFloat(restaurant?.commissionRate?.toString() || '15');
       restaurantCommissionAmount = (subtotalNum * restaurantCommissionRate) / 100;
     } else {
       restaurantCommissionAmount = subtotalNum;
@@ -322,13 +417,29 @@ router.put("/:id/assign-driver", async (req, res) => {
     // Broadcast update via WebSocket
     const ws = req.app.get('ws');
     if (ws) {
-      ws.broadcast('order_update', { orderId: id, status: 'assigned' });
-      // Also send direct notification to the driver
+      // إشعار للعميل بتحديث الحالة وتعيين السائق - مستهدف فقط للأطراف ذات الصلة
+      ws.notifyOrder('order_update', { 
+        orderId: id, 
+        status: 'assigned',
+        driverId,
+        driverName: driver?.name,
+        type: 'regular',
+        orderNumber: order.orderNumber
+      }, {
+        customerId: order.customerId,
+        customerPhone: order.customerPhone,
+        driverId,
+        orderId: id,
+      });
+
+      // إشعار مباشر للسائق مع بيانات الطلب
       if (ws.sendToDriver) {
         ws.sendToDriver(driverId, 'new_order_assigned', { 
           orderId: id, 
           status: 'assigned',
-          message: `تم تعيين طلب جديد رقم ${order.orderNumber} لك`
+          message: `تم تعيين طلب جديد رقم ${order.orderNumber} لك`,
+          type: 'regular',
+          orderData: updatedOrder
         });
       }
     }
@@ -337,6 +448,17 @@ router.put("/:id/assign-driver", async (req, res) => {
 
     // إنشاء إشعارات
     try {
+      // إشعار للعميل
+      await storage.createNotification({
+        type: 'driver_assigned',
+        title: 'تم تحديد سائق لطلبك',
+        message: `تم تحديد السائق ${driver?.name || 'مندوبنا'} لتوصيل طلبك رقم ${order.orderNumber}`,
+        recipientType: 'customer',
+        recipientId: order.customerId || order.customerPhone,
+        orderId: id,
+        isRead: false
+      });
+
       // إشعار مباشر للسائق المعين
       await storage.createNotification({
         type: 'new_order_assigned',
@@ -355,6 +477,17 @@ router.put("/:id/assign-driver", async (req, res) => {
         message: `تم تعيين السائق ${driver.name} للطلب ${order.orderNumber}`,
         recipientType: 'admin',
         recipientId: null,
+        orderId: id,
+        isRead: false
+      });
+
+      // إشعار للعميل عند تعيين السائق
+      await storage.createNotification({
+        type: 'order_status_update',
+        title: 'تم تعيين سائق لطلبك',
+        message: `تم تعيين السائق ${driver.name} لتوصيل طلبك رقم ${order.orderNumber}. السائق في الطريق الآن.`,
+        recipientType: 'customer',
+        recipientId: order.customerId || order.customerPhone,
         orderId: id,
         isRead: false
       });
@@ -378,11 +511,79 @@ router.put("/:id/assign-driver", async (req, res) => {
   }
 });
 
+// تعديل أسعار الطلب (من قبل المدير) - محمي
+router.put("/:id/prices", requireAdminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items, deliveryFee, subtotal, totalAmount, priceAdjustmentNote } = req.body;
+
+    const order = await storage.getOrder(id);
+    if (!order) {
+      return res.status(404).json({ error: "الطلب غير موجود" });
+    }
+
+    const updatedOrder = await storage.updateOrder(id, {
+      items: typeof items === 'string' ? items : JSON.stringify(items),
+      deliveryFee: deliveryFee?.toString(),
+      subtotal: subtotal?.toString(),
+      totalAmount: totalAmount?.toString(),
+      notes: priceAdjustmentNote
+        ? `${order.notes ? order.notes + '\n' : ''}[تعديل مدير: ${priceAdjustmentNote}]`
+        : order.notes,
+      updatedAt: new Date()
+    });
+
+    const ws = req.app.get('ws');
+    if (ws) {
+      ws.notifyOrder('order_update', { orderId: id, priceUpdated: true }, {
+        customerId: order.customerId,
+        customerPhone: order.customerPhone,
+        driverId: order.driverId,
+        orderId: id,
+      });
+    }
+
+    // إنشاء إشعار وقيد تتبع للعميل عند تعديل أسعار الطلب
+    try {
+      const adjMessage = priceAdjustmentNote
+        ? `تم تعديل أسعار الطلب: ${priceAdjustmentNote}`
+        : 'تم تعديل أسعار الطلب من قِبل الإدارة';
+
+      if (order.customerId || order.customerPhone) {
+        await storage.createNotification({
+          type: 'order_price_updated',
+          title: 'تعديل أسعار الطلب',
+          message: `طلبك رقم ${order.orderNumber}: ${adjMessage}`,
+          recipientType: 'customer',
+          recipientId: order.customerId || order.customerPhone,
+          orderId: id,
+          isRead: false,
+        });
+      }
+
+      await storage.createOrderTracking({
+        orderId: id,
+        status: order.status,
+        message: adjMessage,
+        createdBy: 'admin',
+        createdByType: 'admin',
+      });
+    } catch (notifyErr) {
+      console.error('خطأ في إنشاء إشعار/تتبع تعديل الأسعار:', notifyErr);
+    }
+
+    res.json({ success: true, order: updatedOrder });
+  } catch (error) {
+    console.error('خطأ في تعديل أسعار الطلب:', error);
+    res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
 // تحديث حالة الطلب
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, updatedBy, updatedByType } = req.body;
+    const { status, updatedBy, updatedByType, cancelReason } = req.body;
 
     if (!status) {
       return res.status(400).json({ error: "الحالة مطلوبة" });
@@ -395,15 +596,35 @@ router.put("/:id", async (req, res) => {
     }
 
     // تحديث الطلب
-    const updatedOrder = await storage.updateOrder(id, {
-      status,
-      updatedAt: new Date()
-    });
+    let updatedOrder;
+    if (status === 'delivered') {
+      updatedOrder = await storage.completeOrder(id);
+    } else {
+      const updateData: any = {
+        status,
+        updatedAt: new Date()
+      };
+      // حفظ سبب الإلغاء عند إلغاء الطلب
+      if (status === 'cancelled' && cancelReason) {
+        updateData.cancelReason = cancelReason;
+      }
+      updatedOrder = await storage.updateOrder(id, updateData);
+    }
 
-    // Broadcast update via WebSocket
+    // Broadcast update via WebSocket - مستهدف فقط لأطراف الطلب
     const ws = req.app.get('ws');
     if (ws) {
-      ws.broadcast('order_update', { orderId: id, status });
+      ws.notifyOrder('order_update', { 
+        orderId: id, 
+        status,
+        orderNumber: order.orderNumber,
+        type: 'regular'
+      }, {
+        customerId: order.customerId,
+        customerPhone: order.customerPhone,
+        driverId: order.driverId,
+        orderId: id,
+      });
     }
 
     // إنشاء رسالة الحالة
@@ -426,72 +647,11 @@ router.put("/:id", async (req, res) => {
         break;
       case 'delivered':
         statusMessage = 'تم تسليم الطلب بنجاح';
-        
-        // تحرير السائق وتحديث أرباحه وأرباح المطعم
-        if (order.driverId) {
-          await storage.updateDriver(order.driverId, { isAvailable: true });
-          
-          // تحديث رصيد السائق في المحفظة
-          try {
-            const driverEarnings = parseFloat(order.driverEarnings?.toString() || '0');
-            if (driverEarnings > 0) {
-              const { AdvancedDatabaseStorage } = await import("../db-advanced");
-              const advStorage = new AdvancedDatabaseStorage(storage.db);
-              
-              // التحقق من وجود محفظة للسائق أو إنشاؤها
-              let wallet = await advStorage.getDriverWallet(order.driverId);
-              if (!wallet) {
-                await advStorage.createDriverWallet({
-                  driverId: order.driverId,
-                  balance: "0",
-                  isActive: true
-                });
-              }
-              await advStorage.addDriverWalletBalance(order.driverId, driverEarnings);
-              
-              // تحديث إجمالي الأرباح في جدول السائقين
-              const driver = await storage.getDriver(order.driverId);
-              const currentEarnings = parseFloat(driver?.earnings?.toString() || '0');
-              const currentCompletedOrders = driver?.completedOrders || 0;
-              await storage.updateDriver(order.driverId, {
-                earnings: String(currentEarnings + driverEarnings),
-                completedOrders: currentCompletedOrders + 1
-              });
-            }
-          } catch (e) {
-            console.error('Error updating driver earnings:', e);
-          }
-        }
-
-        // تحديث أرباح المطعم
-        if (order.restaurantId) {
-          try {
-            const restaurantEarnings = parseFloat(order.restaurantEarnings?.toString() || '0');
-            if (restaurantEarnings > 0) {
-              const { AdvancedDatabaseStorage } = await import("../db-advanced");
-              const advStorage = new AdvancedDatabaseStorage(storage.db);
-              
-              let rWallet = await advStorage.getRestaurantWallet(order.restaurantId);
-              if (!rWallet) {
-                await advStorage.createRestaurantWallet({
-                  restaurantId: order.restaurantId,
-                  balance: "0",
-                  isActive: true
-                });
-              }
-              
-              const currentBalance = parseFloat(rWallet?.balance?.toString() || "0");
-              await advStorage.updateRestaurantWallet(order.restaurantId, {
-                balance: String(currentBalance + restaurantEarnings)
-              });
-            }
-          } catch (e) {
-            console.error('Error updating restaurant earnings:', e);
-          }
-        }
         break;
       case 'cancelled':
-        statusMessage = 'تم إلغاء الطلب';
+        statusMessage = cancelReason 
+          ? `تم إلغاء الطلب - السبب: ${cancelReason}` 
+          : 'تم إلغاء الطلب';
         // تحرير السائق إذا كان مُعيَّناً
         if (order.driverId) {
           await storage.updateDriver(order.driverId, { isAvailable: true });
@@ -564,14 +724,114 @@ router.get("/customer/:phone", async (req, res) => {
   }
 });
 
+// جلب السائقين الأقرب للطلب
+router.get("/:orderId/closest-drivers", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await storage.getOrder(orderId);
+    
+    let lat: number | null = null;
+    let lng: number | null = null;
+
+    if (order) {
+      if (order.restaurantId) {
+        const restaurant = await storage.getRestaurant(order.restaurantId);
+        if (restaurant && restaurant.latitude && restaurant.longitude) {
+          lat = parseFloat(restaurant.latitude);
+          lng = parseFloat(restaurant.longitude);
+        }
+      }
+      
+      if (lat === null && order.customerLocationLat && order.customerLocationLng) {
+        lat = parseFloat(order.customerLocationLat);
+        lng = parseFloat(order.customerLocationLng);
+      }
+    } else {
+      const db = (storage as any).db;
+      if (db) {
+        const { wasalniRequests } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const [found] = await db.select().from(wasalniRequests).where(eq(wasalniRequests.id, orderId));
+        if (found && found.fromLat && found.fromLng) {
+          lat = parseFloat(found.fromLat);
+          lng = parseFloat(found.fromLng);
+        }
+      }
+    }
+
+    if (lat === null || lng === null) {
+      return res.status(400).json({ error: "لا يمكن تحديد موقع الانطلاق للطلب" });
+    }
+
+    const closestDrivers = await storage.getClosestDrivers(lat, lng, 10);
+    res.json(closestDrivers);
+  } catch (error) {
+    console.error("خطأ في جلب السائقين الأقرب:", error);
+    res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
+// جلب طلب برقم الطلب
+router.get("/number/:orderNumber", async (req, res) => {
+  try {
+    const { orderNumber } = req.params;
+    const db = (storage as any).db;
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    
+    const { orders } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [order] = await db.select().from(orders).where(eq(orders.orderNumber, orderNumber));
+    
+    if (!order) return res.status(404).json({ error: "الطلب غير موجود" });
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: "خطأ في البحث" });
+  }
+});
+
 // جلب تفاصيل تتبع الطلب
 router.get("/:orderId/track", async (req, res) => {
   try {
     const { orderId } = req.params;
     
-    const order = await storage.getOrder(orderId);
+    let order = await storage.getOrder(orderId);
+    let isWaselLi = false;
+    let wasalniRequest = null;
+
     if (!order) {
-      return res.status(404).json({ error: "الطلب غير موجود" });
+      // البحث في طلبات "وصلي" إذا لم يتم العثور عليه في الطلبات العادية
+      const db = (storage as any).db;
+      if (db) {
+        const { wasalniRequests } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const [found] = await db.select().from(wasalniRequests).where(eq(wasalniRequests.id, orderId));
+        wasalniRequest = found;
+      }
+      
+      if (!wasalniRequest) {
+        return res.status(404).json({ error: "الطلب غير موجود" });
+      }
+
+      isWaselLi = true;
+      // تحويل بيانات "وصلي" إلى تنسيق متوافق مع صفحة التتبع
+      order = {
+        id: wasalniRequest.id,
+        orderNumber: wasalniRequest.requestNumber,
+        customerName: wasalniRequest.customerName,
+        customerPhone: wasalniRequest.customerPhone,
+        deliveryAddress: wasalniRequest.toAddress,
+        status: wasalniRequest.status,
+        estimatedTime: "جاري التحديد",
+        driverId: wasalniRequest.driverId,
+        isWaselLi: true,
+        pickupAddress: wasalniRequest.fromAddress,
+        pickupPhone: wasalniRequest.customerPhone,
+        pickupName: wasalniRequest.customerName,
+        waselLiItemType: wasalniRequest.orderType,
+        totalAmount: String(wasalniRequest.estimatedFee || "0"),
+        createdAt: wasalniRequest.createdAt,
+        items: JSON.stringify([])
+      } as any;
     }
 
     // جلب بيانات السائق إذا كانت موجودة
@@ -587,7 +847,12 @@ router.get("/:orderId/track", async (req, res) => {
     }
 
     // جلب سجل تتبع الطلب
-    const trackingHistory = await storage.getOrderTracking(orderId);
+    let trackingHistory = [];
+    try {
+      trackingHistory = await storage.getOrderTracking(orderId);
+    } catch (err) {
+      console.error("Error fetching tracking history:", err);
+    }
     
     // تنسيق البيانات لتتوافق مع واجهة التتبع
     const formattedOrder = {
@@ -597,12 +862,23 @@ router.get("/:orderId/track", async (req, res) => {
       items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items
     };
 
-    const formattedTracking = trackingHistory.map(t => ({
+    let formattedTracking = trackingHistory.map((t: any) => ({
       id: t.id,
       status: t.status,
       timestamp: t.createdAt,
       description: t.message
     }));
+
+    if (formattedTracking.length === 0) {
+      formattedTracking = [
+        {
+          id: "initial",
+          status: order.status || 'pending',
+          timestamp: order.createdAt,
+          description: isWaselLi ? "تم استلام طلب وصل لي" : "تم استلام الطلب وجاري المراجعة"
+        }
+      ];
+    }
 
     res.json({
       order: formattedOrder,
@@ -650,22 +926,41 @@ router.patch("/:orderId/cancel", async (req, res) => {
       await storage.updateDriver(order.driverId, { isAvailable: true });
     }
 
+    // Notify customer via WebSocket - مستهدف
+    const ws = req.app.get('ws');
+    if (ws) {
+      ws.notifyOrder('order_update', { 
+        orderId: orderId, 
+        status: 'cancelled', 
+        orderNumber: order.orderNumber,
+        type: 'regular'
+      }, {
+        customerId: order.customerId,
+        customerPhone: order.customerPhone,
+        driverId: order.driverId,
+        orderId,
+      });
+    }
+
     // إنشاء إشعارات
     try {
+      const statusMessage = reason ? `تم إلغاء الطلب - السبب: ${reason}` : 'تم إلغاء الطلب';
+      
+      // إشعار للعميل
       await storage.createNotification({
-        type: 'order_cancelled',
-        title: 'تم إلغاء الطلب',
-        message: `تم إلغاء طلبك رقم ${order.orderNumber}${reason ? ': ' + reason : ''}`,
+        type: 'order_status_update',
+        title: 'تحديث حالة الطلب',
+        message: `طلبك رقم ${order.orderNumber}: ${statusMessage}`,
         recipientType: 'customer',
         recipientId: order.customerId || order.customerPhone,
-        orderId,
+        orderId: orderId,
         isRead: false
       });
 
       await storage.createOrderTracking({
         orderId,
         status: 'cancelled',
-        message: reason || 'تم إلغاء الطلب',
+        message: statusMessage,
         createdBy: cancelledBy || 'system',
         createdByType: 'system'
       });

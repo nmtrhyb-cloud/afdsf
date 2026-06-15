@@ -1,9 +1,62 @@
 import express from "express";
 import { storage } from "../storage.js";
+import { dbStorage } from "../db";
 import * as schema from "../../shared/schema.js";
 import { eq, desc, and, or, like, sql } from "drizzle-orm";
 
+const db = dbStorage.db;
+
 const router = express.Router();
+
+// التحقق من حالة التطبيق
+router.get("/app-status", async (req, res) => {
+  try {
+    const { opening, closing, status } = req.query;
+    const openingTime = opening as string || '08:00';
+    const closingTime = closing as string || '23:00';
+    const storeStatus = status as string || 'open';
+
+    if (storeStatus === 'closed') {
+      return res.json({ isOpen: false, message: "التطبيق مغلق حالياً من قِبل الإدارة", openingTime });
+    }
+
+    if (storeStatus === 'open') {
+      return res.json({ isOpen: true });
+    }
+
+    const now = new Date();
+    // الحصول على الوقت الحالي بتوقيت اليمن (UTC+3)
+    const yemenTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+    const currentTime = yemenTime.toISOString().split('T')[1].slice(0, 5);
+    
+    const timeToMinutes = (t: string) => { 
+      const [h, m] = t.split(':').map(Number); 
+      return h * 60 + m; 
+    };
+    
+    const current = timeToMinutes(currentTime);
+    const open = timeToMinutes(openingTime);
+    const close = timeToMinutes(closingTime);
+    
+    let appIsOpen = close > open 
+      ? (current >= open && current < close) 
+      : (current >= open || current < close);
+
+    if (!appIsOpen) {
+      const isBeforeOpen = current < open;
+      const whenOpen = isBeforeOpen ? `يفتح اليوم الساعة ${openingTime}` : `يفتح غداً الساعة ${openingTime}`;
+      return res.json({ 
+        isOpen: false, 
+        message: `التطبيق مغلق حالياً. ${whenOpen}`,
+        openingTime 
+      });
+    }
+
+    res.json({ isOpen: true });
+  } catch (error) {
+    res.status(500).json({ isOpen: false, message: "خطأ في التحقق من حالة التطبيق" });
+  }
+});
 
 // جلب التصنيفات
 router.get("/categories", async (req, res) => {
@@ -78,6 +131,49 @@ router.get("/restaurants/:id/menu", async (req, res) => {
   } catch (error) {
     console.error("خطأ في جلب قائمة المطعم:", error);
     res.status(500).json({ message: "Failed to fetch menu items" });
+  }
+});
+
+// جلب أقسام المطعم
+router.get("/restaurants/:id/sections", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sections = await storage.getRestaurantSections(id);
+    res.json(sections);
+  } catch (error) {
+    console.error("خطأ في جلب أقسام المطعم:", error);
+    res.status(500).json({ message: "Failed to fetch restaurant sections" });
+  }
+});
+
+// تقييم مطعم مباشرة
+router.post("/restaurants/:id/rate", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rating, comment, customerName } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: "التقييم يجب أن يكون بين 1 و 5" });
+    }
+
+    const restaurant = await storage.getRestaurant(id);
+    if (!restaurant) {
+      return res.status(404).json({ message: "المطعم غير موجود" });
+    }
+
+    const ratingData = {
+      restaurantId: id,
+      customerName: customerName || "زائر",
+      rating: Number(rating),
+      comment: comment || null,
+      isApproved: false,
+    };
+
+    const newRating = await storage.createRating(ratingData as any);
+    res.status(201).json({ success: true, rating: newRating });
+  } catch (error) {
+    console.error("خطأ في إرسال التقييم:", error);
+    res.status(500).json({ message: "فشل في إرسال التقييم" });
   }
 });
 
@@ -176,7 +272,7 @@ router.get("/orders/:id/track", async (req, res) => {
 router.get("/settings", async (req, res) => {
   try {
     const settings = await db.query.systemSettings.findMany({
-      where: eq(schema.systemSettings.isPublic, true)
+      where: eq(schema.systemSettings.isActive, true)
     });
     
     // تحويل الإعدادات إلى كائن
@@ -286,12 +382,12 @@ router.get("/flutter/app-config", async (req, res) => {
         splashEnabled: settings['show_splash_screen'] !== 'false',
         splashImageUrl: settings['splash_image_url'] || '',
         splashImageUrl2: settings['splash_image_url2'] || '',
-        splashTitle: settings['splash_title'] || 'طمطوم',
+        splashTitle: settings['splash_title'] || 'واصل',
         splashSubtitle: settings['splash_subtitle'] || 'متجر الخضار والفواكه',
         splashBackgroundColor: settings['splash_background_color'] || '#FFFFFF',
         splashDuration: parseInt(settings['splash_duration'] || '3000'),
         logoUrl: settings['logo_url'] || '',
-        appName: settings['app_name'] || 'طمطوم',
+        appName: settings['app_name'] || 'واصل',
         appVersion: '1.0.0',
         primaryColor: settings['primary_color'] || '#4CAF50',
         secondaryColor: settings['secondary_color'] || '#FF9800',
@@ -309,12 +405,12 @@ router.get("/flutter/app-config", async (req, res) => {
         splashEnabled: true,
         splashImageUrl: '',
         splashImageUrl2: '',
-        splashTitle: 'طمطوم',
+        splashTitle: 'واصل',
         splashSubtitle: 'متجر الخضار والفواكه',
         splashBackgroundColor: '#FFFFFF',
         splashDuration: 3000,
         logoUrl: '',
-        appName: 'طمطوم',
+        appName: 'واصل',
         appVersion: '1.0.0',
         primaryColor: '#4CAF50',
         secondaryColor: '#FF9800',

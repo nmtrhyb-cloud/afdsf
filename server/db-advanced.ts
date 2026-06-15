@@ -1,11 +1,11 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { 
-  driverReviews, driverEarningsTable , driverWallets, restaurantWallets,
+  driverReviews, driverEarningsTable , driverBalances, restaurantWallets,
   commissionSettings, withdrawalRequests, driverWorkSessions,
   drivers, orders, users,
   type DriverReview, type InsertDriverReview,
   type DriverEarnings, type InsertDriverEarnings,
-  type DriverWallet, type InsertDriverWallet,
+  type DriverBalance, type InsertDriverBalance,
   type RestaurantWallet, type InsertRestaurantWallet,
   type CommissionSettings, type InsertCommissionSettings,
   type WithdrawalRequest, type InsertWithdrawalRequest,
@@ -55,16 +55,16 @@ export class AdvancedDatabaseStorage {
 
   // Driver Earnings
   async updateDriverEarnings(driverId: string, earnings: Partial<InsertDriverEarnings>): Promise<DriverEarnings> {
-    const result = await this.db.update(driverEarnings)
+    const result = await this.db.update(driverEarningsTable)
       .set(earnings)
-      .where(eq(driverEarnings.driverId, driverId))
+      .where(eq(driverEarningsTable.driverId, driverId))
       .returning();
     return result[0];
   }
 
   async getDriverEarnings(driverId: string): Promise<DriverEarnings | null> {
-    const result = await this.db.select().from(driverEarnings)
-      .where(eq(driverEarnings.driverId, driverId));
+    const result = await this.db.select().from(driverEarningsTable)
+      .where(eq(driverEarningsTable.driverId, driverId));
     return result[0] || null;
   }
 
@@ -82,45 +82,60 @@ export class AdvancedDatabaseStorage {
     };
   }
 
-  // Driver Wallets
-  async createDriverWallet(wallet: InsertDriverWallet): Promise<DriverWallet> {
-    const result = await this.db.insert(driverWallets).values(wallet).returning();
+  // Driver Wallets (Balances)
+  async createDriverWallet(balance: InsertDriverBalance): Promise<DriverBalance> {
+    const result = await this.db.insert(driverBalances).values(balance).returning();
     return result[0];
   }
 
-  async getDriverWallet(driverId: string): Promise<DriverWallet | null> {
-    const result = await this.db.select().from(driverWallets)
-      .where(eq(driverWallets.driverId, driverId));
+  async getDriverWallet(driverId: string): Promise<DriverBalance | null> {
+    const result = await this.db.select().from(driverBalances)
+      .where(eq(driverBalances.driverId, driverId));
     return result[0] || null;
   }
 
-  async updateDriverWallet(driverId: string, updates: Partial<InsertDriverWallet>): Promise<DriverWallet> {
-    const result = await this.db.update(driverWallets)
+  async updateDriverWallet(driverId: string, updates: Partial<InsertDriverBalance>): Promise<DriverBalance> {
+    const result = await this.db.update(driverBalances)
       .set({ ...updates, updatedAt: new Date() })
-      .where(eq(driverWallets.driverId, driverId))
+      .where(eq(driverBalances.driverId, driverId))
       .returning();
     return result[0];
   }
 
-  async addDriverWalletBalance(driverId: string, amount: number): Promise<DriverWallet> {
+  async addDriverWalletBalance(driverId: string, amount: number): Promise<DriverBalance> {
     const wallet = await this.getDriverWallet(driverId);
-    if (!wallet) throw new Error("Wallet not found");
+    if (!wallet) {
+      // Create if not exists
+      return await this.createDriverWallet({
+        driverId,
+        totalBalance: amount.toString(),
+        availableBalance: amount.toString(),
+        withdrawnAmount: "0",
+        pendingAmount: "0"
+      });
+    }
     
-    const currentBalance = parseFloat(wallet.balance?.toString() || "0");
-    const newBalance = currentBalance + amount;
+    const currentAvailable = parseFloat(wallet.availableBalance?.toString() || "0");
+    const currentTotal = parseFloat(wallet.totalBalance?.toString() || "0");
     
-    return await this.updateDriverWallet(driverId, { balance: newBalance.toString() });
+    return await this.updateDriverWallet(driverId, { 
+      availableBalance: (currentAvailable + amount).toString(),
+      totalBalance: (currentTotal + amount).toString()
+    });
   }
 
-  async deductDriverWalletBalance(driverId: string, amount: number): Promise<DriverWallet> {
+  async deductDriverWalletBalance(driverId: string, amount: number): Promise<DriverBalance> {
     const wallet = await this.getDriverWallet(driverId);
     if (!wallet) throw new Error("Wallet not found");
     
-    const currentBalance = parseFloat(wallet.balance?.toString() || "0");
-    if (currentBalance < amount) throw new Error("Insufficient balance");
+    const currentAvailable = parseFloat(wallet.availableBalance?.toString() || "0");
+    const currentTotal = parseFloat(wallet.totalBalance?.toString() || "0");
+    if (currentAvailable < amount) throw new Error("Insufficient balance");
     
-    const newBalance = currentBalance - amount;
-    return await this.updateDriverWallet(driverId, { balance: newBalance.toString() });
+    return await this.updateDriverWallet(driverId, { 
+      availableBalance: (currentAvailable - amount).toString(),
+      totalBalance: (currentTotal - amount).toString()
+    });
   }
 
   // Restaurant Wallets
@@ -333,5 +348,97 @@ export class AdvancedDatabaseStorage {
       netRevenue,
       averageOrderValue: restaurantOrders.length > 0 ? totalRevenue / restaurantOrders.length : 0
     };
+  }
+
+  // التقارير المتقدمة الجديدة
+  async getDailyRevenue(days: number = 30) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const recentOrders = await this.db.select().from(orders)
+      .where(and(
+        eq(orders.status, 'delivered'),
+        gte(orders.createdAt, startDate)
+      ));
+
+    const revenueByDay: Record<string, number> = {};
+    
+    // تهيئة الأيام
+    for (let i = 0; i <= days; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      revenueByDay[d.toISOString().split('T')[0]] = 0;
+    }
+
+    recentOrders.forEach((order: any) => {
+      const day = order.createdAt.toISOString().split('T')[0];
+      if (revenueByDay[day] !== undefined) {
+        revenueByDay[day] += parseFloat(order.totalAmount?.toString() || "0");
+      }
+    });
+
+    return Object.entries(revenueByDay)
+      .map(([date, amount]) => ({ date, amount }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  async getCustomerRetentionStats() {
+    const allOrders = await this.db.select().from(orders);
+    const customerOrderCount: Record<string, number> = {};
+    
+    allOrders.forEach((order: any) => {
+      if (order.customerId) {
+        customerOrderCount[order.customerId] = (customerOrderCount[order.customerId] || 0) + 1;
+      }
+    });
+
+    const counts = Object.values(customerOrderCount);
+    const totalCustomers = counts.length;
+    const returningCustomers = counts.filter(c => c > 1).length;
+    const newCustomers = totalCustomers - returningCustomers;
+
+    return {
+      newCustomers,
+      returningCustomers,
+      retentionRate: totalCustomers > 0 ? (returningCustomers / totalCustomers) * 100 : 0
+    };
+  }
+
+  async getTopDeliveryAreas(limit: number = 5) {
+    const allOrders = await this.db.select().from(orders);
+    const areaCounts: Record<string, number> = {};
+
+    allOrders.forEach((order: any) => {
+      // استخراج الحي أو المنطقة من العنوان (تبسيط للمثال)
+      const address = order.deliveryAddress || "";
+      const area = address.split(',')[0].trim(); // نفترض أن المنطقة هي الجزء الأول قبل الفاصلة
+      if (area) {
+        areaCounts[area] = (areaCounts[area] || 0) + 1;
+      }
+    });
+
+    return Object.entries(areaCounts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  }
+
+  async getInactiveUsers(days: number = 7) {
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - days);
+
+    // الحصول على جميع العملاء
+    const allUsers = await this.db.select().from(users);
+    
+    // الحصول على الطلبات الأخيرة
+    const recentOrders = await this.db.select().from(orders)
+      .where(gte(orders.createdAt, thresholdDate));
+    
+    const activeCustomerIds = new Set(recentOrders.map((o: any) => o.customerId).filter(Boolean));
+    
+    // المستخدمون الذين ليس لديهم طلبات في الفترة المحددة
+    const inactiveUsers = allUsers.filter((u: any) => !activeCustomerIds.has(u.id));
+    
+    return inactiveUsers;
   }
 }

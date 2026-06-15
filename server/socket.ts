@@ -2,7 +2,6 @@ import { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { log } from "./viteServer";
 import { storage } from "./storage";
-import { registerNotificationHandlers, emitNotification } from "./notificationEvents";
 
 export interface SocketMessage {
   type: string;
@@ -25,44 +24,7 @@ export function setupWebSockets(server: Server) {
   const userConnections = new Map<string, WebSocket[]>();
   const orderTrackers = new Map<string, WebSocket[]>();
 
-  registerNotificationHandlers({
-    broadcast: (type, payload) => {
-      const message = JSON.stringify({ type, payload });
-      wss.clients.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      });
-    },
-    sendToDriver: (driverId, type, payload) => {
-      const connections = userConnections.get(`driver_${driverId}`) || [];
-      const message = JSON.stringify({ type, payload });
-      connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      });
-    },
-    sendToAdmin: (type, payload) => {
-      const connections = userConnections.get("admin_dashboard") || [];
-      const message = JSON.stringify({ type, payload });
-      connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      });
-    },
-    sendToUser: (userId, type, payload) => {
-      const connections = userConnections.get(userId) || [];
-      const message = JSON.stringify({ type, payload });
-      connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
-          client.send(message);
-        }
-      });
-    },
-  });
-
+  // Heartbeat interval
   const interval = setInterval(() => {
     wss.clients.forEach((ws: any) => {
       if (ws.isAlive === false) return ws.terminate();
@@ -75,7 +37,7 @@ export function setupWebSockets(server: Server) {
     log(`New WS connection from ${req.socket.remoteAddress}`);
     ws.isAlive = true;
 
-    ws.on("pong", () => {
+    ws.on('pong', () => {
       ws.isAlive = true;
     });
 
@@ -93,15 +55,15 @@ export function setupWebSockets(server: Server) {
         if (connection.ws === ws) {
           const connectionKey = connection.connectionKey;
           const orderId = connection.orderId;
-
+          
           clients.delete(id);
-
+          
           const connections = userConnections.get(connectionKey) || [];
           const index = connections.indexOf(ws);
           if (index > -1) {
             connections.splice(index, 1);
           }
-
+          
           if (connections.length === 0) {
             userConnections.delete(connectionKey);
           }
@@ -126,15 +88,16 @@ export function setupWebSockets(server: Server) {
     broadcast: (type: string, payload: any) => {
       const message = JSON.stringify({ type, payload });
       wss.clients.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
+        if (client.readyState === WebSocket.OPEN) {
           client.send(message);
         }
       });
 
-      if (type === "order_update" && payload.orderId) {
+      // Also specifically check order trackers if it's an order update
+      if (type === 'order_update' && payload.orderId) {
         const trackers = orderTrackers.get(payload.orderId) || [];
         trackers.forEach((client) => {
-          if ((client as any).readyState === WebSocket.OPEN) {
+          if (client.readyState === WebSocket.OPEN) {
             client.send(message);
           }
         });
@@ -143,9 +106,9 @@ export function setupWebSockets(server: Server) {
     sendToUser: (userId: string, type: string, payload: any) => {
       const connections = userConnections.get(userId) || [];
       const message = JSON.stringify({ type, payload });
-
+      
       connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
+        if (client.readyState === WebSocket.OPEN) {
           client.send(message);
         }
       });
@@ -153,29 +116,70 @@ export function setupWebSockets(server: Server) {
     sendToDriver: (driverId: string, type: string, payload: any) => {
       const connections = userConnections.get(`driver_${driverId}`) || [];
       const message = JSON.stringify({ type, payload });
-
+      
       connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
+        if (client.readyState === WebSocket.OPEN) {
           client.send(message);
         }
       });
     },
     sendToAdmin: (type: string, payload: any) => {
-      const connections = userConnections.get("admin_dashboard") || [];
+      const connections = userConnections.get('admin_dashboard') || [];
       const message = JSON.stringify({ type, payload });
-
+      
       connections.forEach((client) => {
-        if ((client as any).readyState === WebSocket.OPEN) {
+        if (client.readyState === WebSocket.OPEN) {
           client.send(message);
         }
       });
     },
+    /**
+     * Send an order update ONLY to relevant parties:
+     * the order's customer (by id and/or phone), the assigned driver,
+     * the admin dashboard, and any clients explicitly tracking the order.
+     * This avoids the noisy global broadcast that was hitting all customers.
+     */
+    notifyOrder: (
+      type: string,
+      payload: any,
+      recipients: { customerId?: string | null; customerPhone?: string | null; driverId?: string | null; orderId?: string | null; includeAdmin?: boolean } = {}
+    ) => {
+      const message = JSON.stringify({ type, payload });
+      const sent = new Set<WebSocket>();
+
+      const sendToKey = (key?: string | null) => {
+        if (!key) return;
+        const conns = userConnections.get(key) || [];
+        conns.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN && !sent.has(client)) {
+            client.send(message);
+            sent.add(client);
+          }
+        });
+      };
+
+      sendToKey(recipients.customerId);
+      sendToKey(recipients.customerPhone);
+      if (recipients.driverId) sendToKey(`driver_${recipients.driverId}`);
+      if (recipients.includeAdmin !== false) sendToKey('admin_dashboard');
+
+      const orderId = recipients.orderId || (payload && payload.orderId);
+      if (orderId) {
+        const trackers = orderTrackers.get(orderId) || [];
+        trackers.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN && !sent.has(client)) {
+            client.send(message);
+            sent.add(client);
+          }
+        });
+      }
+    }
   };
 }
 
 async function handleMessage(
-  ws: WebSocket,
-  message: SocketMessage,
+  ws: WebSocket, 
+  message: SocketMessage, 
   clients: Map<string, UserConnection>,
   userConnections: Map<string, WebSocket[]>,
   orderTrackers: Map<string, WebSocket[]>,
@@ -185,21 +189,23 @@ async function handleMessage(
     case "auth":
       if (message.payload.userId) {
         const userId = message.payload.userId;
-        const userType = message.payload.userType || "customer";
-
-        const connectionKey = userType === "driver" ? `driver_${userId}` : userId;
-
+        const userType = message.payload.userType || 'customer';
+        
+        // Use consistent prefixing
+        const connectionKey = userType === 'driver' ? `driver_${userId}` : userId;
+        
         clients.set(`${userId}_${Date.now()}`, {
           ws,
           userId,
           userType,
           connectionKey,
+          isAlive: true
         });
-
+        
         const connections = userConnections.get(connectionKey) || [];
         connections.push(ws);
         userConnections.set(connectionKey, connections);
-
+        
         log(`User ${userId} (${userType}) authenticated via WS with key ${connectionKey}`);
       }
       break;
@@ -207,7 +213,8 @@ async function handleMessage(
     case "track_order":
       if (message.payload.orderId) {
         const orderId = message.payload.orderId;
-
+        
+        // Find existing client entry for this WS
         for (const [id, connection] of clients.entries()) {
           if (connection.ws === ws) {
             connection.orderId = orderId;
@@ -223,48 +230,74 @@ async function handleMessage(
         log(`Client tracking order ${orderId} via WS`);
       }
       break;
-
+      
     case "location_update":
-      const { driverId, latitude, longitude } = message.payload;
+      const { driverId, latitude, longitude, currentLocation } = message.payload;
       if (driverId && latitude && longitude) {
+        // تحديث قاعدة البيانات لضمان بقاء الموقع حتى لو انقطع الاتصال
+        try {
+          storage.updateDriver(driverId, {
+            latitude: latitude.toString(),
+            longitude: longitude.toString(),
+            currentLocation: currentLocation || undefined
+          }).catch(err => console.error('Error updating driver location in DB:', err));
+        } catch (e) {
+          console.error('Failed to update driver location:', e);
+        }
+
         const broadcastMsg = JSON.stringify({
           type: "driver_location",
-          payload: { driverId, latitude, longitude, timestamp: Date.now() },
+          payload: { driverId, latitude, longitude, currentLocation, timestamp: Date.now() }
         });
-
+        
         wss.clients.forEach((client) => {
-          if ((client as any).readyState === WebSocket.OPEN) {
+          if (client.readyState === WebSocket.OPEN) {
             client.send(broadcastMsg);
           }
         });
       }
       break;
 
+    case "settings_update":
+      // بث تغيير الإعدادات لجميع المتصلين (عملاء وسائقين)
+      const settingsPayload = message.payload;
+      const settingsMsg = JSON.stringify({
+        type: "settings_changed",
+        payload: settingsPayload
+      });
+      
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(settingsMsg);
+        }
+      });
+      break;
+      
     case "driver_assigned":
-      const payload = message.payload;
-      const orderId = payload.orderId;
-      const assignedDriverId = payload.driverId;
-      const driverName = payload.driverName;
+        const payload = message.payload;
+        const orderId = payload.orderId;
+        const assignedDriverId = payload.driverId;
+        const driverName = payload.driverName;
       if (orderId && assignedDriverId) {
         const notificationMsg = JSON.stringify({
           type: "new_order_assigned",
-          payload: {
-            orderId,
+          payload: { 
+            orderId, 
             driverId: assignedDriverId,
             driverName,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         });
-
+        
         const driverConnections = userConnections.get(`driver_${assignedDriverId}`) || [];
         driverConnections.forEach((client) => {
-          if ((client as any).readyState === WebSocket.OPEN) {
+          if (client.readyState === WebSocket.OPEN) {
             client.send(notificationMsg);
           }
         });
       }
       break;
-
+      
     case "order_update":
       const updatePayload = message.payload;
       const updateOrderId = updatePayload.orderId;
@@ -273,79 +306,19 @@ async function handleMessage(
       if (updateOrderId && status) {
         const updateMsg = JSON.stringify({
           type: "order_status_changed",
-          payload: {
-            orderId: updateOrderId,
+          payload: { 
+            orderId: updateOrderId, 
             status,
             message: updateMessage,
-            timestamp: Date.now(),
-          },
+            timestamp: Date.now()
+          }
         });
-
+        
         wss.clients.forEach((client) => {
-          if ((client as any).readyState === WebSocket.OPEN) {
+          if (client.readyState === WebSocket.OPEN) {
             client.send(updateMsg);
           }
         });
-      }
-      break;
-
-    case "send_chat_message":
-      const msgPayload = message.payload;
-      const msgOrderId = msgPayload.orderId;
-      const senderId = msgPayload.senderId;
-      const senderType = msgPayload.senderType;
-      const receiverId = msgPayload.receiverId;
-      const receiverType = msgPayload.receiverType;
-      const content = msgPayload.content;
-
-      if (msgOrderId && senderId && receiverId && content) {
-        try {
-          const newMessage = await storage.createMessage({
-            orderId: msgOrderId,
-            senderId,
-            senderType: senderType || "customer",
-            receiverId,
-            receiverType: receiverType || "driver",
-            content,
-            isRead: false,
-          });
-
-          const chatMsg = JSON.stringify({
-            type: "new_chat_message",
-            payload: newMessage,
-          });
-
-          const receiverKey = receiverType === "driver" ? `driver_${receiverId}` : receiverId;
-          const receiverConnections = userConnections.get(receiverKey) || [];
-          receiverConnections.forEach((client) => {
-            if ((client as any).readyState === WebSocket.OPEN) {
-              client.send(chatMsg);
-            }
-          });
-
-          const senderKey = senderType === "driver" ? `driver_${senderId}` : senderId;
-          const senderConnections = userConnections.get(senderKey) || [];
-          senderConnections.forEach((client) => {
-            if ((client as any).readyState === WebSocket.OPEN && client !== ws) {
-              client.send(chatMsg);
-            }
-          });
-
-          ws.send(
-            JSON.stringify({
-              type: "chat_message_sent",
-              payload: { tempId: message.payload.tempId, messageId: newMessage.id },
-            })
-          );
-        } catch (err) {
-          log(`Failed to process chat message: ${err}`);
-          ws.send(
-            JSON.stringify({
-              type: "chat_message_error",
-              payload: { tempId: message.payload.tempId, error: "Failed to send message" },
-            })
-          );
-        }
       }
       break;
   }
