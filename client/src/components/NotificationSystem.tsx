@@ -125,7 +125,7 @@ export function NotificationSystem({ userType, userId }: NotificationSystemProps
                     <h4 className="font-medium text-foreground text-sm">{notification.title}</h4>
                     <p className="text-xs text-muted-foreground">{notification.message}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {notification.timestamp.toLocaleTimeString('ar-YE')}
+                      {notification.timestamp.toLocaleTimeString('ar-SA')}
                     </p>
                   </div>
                   {!notification.read && (

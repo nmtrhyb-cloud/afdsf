@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiRequest, queryClient } from '@/lib/queryClient'
 import { Driver, InsertDriver } from '@shared/schema'
 import { Plus, Search, Edit, Trash2, Car, MapPin, Clock, DollarSign, Eye, EyeOff } from 'lucide-react'
+import { formatCurrency, formatDate } from '@/lib/utils'
 
 export default function DriversManagement() {
   const [searchTerm, setSearchTerm] = useState('')
@@ -386,13 +387,13 @@ export default function DriversManagement() {
               
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <DollarSign className="w-4 h-4" />
-                <span data-testid={`text-driver-earnings-${driver.id}`}>{driver.earnings || '0'} ر.س</span>
+                <span data-testid={`text-driver-earnings-${driver.id}`}>{formatCurrency(driver.earnings || '0')}</span>
               </div>
               
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Clock className="w-4 h-4" />
                 <span data-testid={`text-driver-created-${driver.id}`}>
-                  {driver.createdAt ? new Date(driver.createdAt).toLocaleDateString('ar-SA') : 'غير محدد'}
+                  {driver.createdAt ? formatDate(driver.createdAt) : 'غير محدد'}
                 </span>
               </div>
               
