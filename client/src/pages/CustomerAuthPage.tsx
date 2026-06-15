@@ -10,6 +10,25 @@ import { useAuth } from '@/context/AuthContext';
 import { Loader2, User, UserPlus, Phone, Lock, ArrowRight } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+function validateSaudiPhone(phone: string): { valid: boolean; normalized: string; error?: string } {
+  const cleaned = phone.replace(/[\s\-\(\)]/g, '');
+  let normalized = cleaned;
+  if (cleaned.startsWith('+9665')) {
+    normalized = '0' + cleaned.slice(4);
+  } else if (cleaned.startsWith('009665')) {
+    normalized = '0' + cleaned.slice(5);
+  } else if (cleaned.startsWith('9665')) {
+    normalized = '0' + cleaned.slice(3);
+  } else if (cleaned.startsWith('5') && cleaned.length === 9) {
+    normalized = '0' + cleaned;
+  }
+  const saudiRegex = /^05[0-9]{8}$/;
+  if (!saudiRegex.test(normalized)) {
+    return { valid: false, normalized: cleaned, error: 'يجب أن يكون رقم هاتف سعودي صحيح (مثال: 0512345678)' };
+  }
+  return { valid: true, normalized };
+}
+
 declare global {
   interface Window {
     google: {
@@ -188,7 +207,7 @@ export default function CustomerAuthPage() {
     try {
       const result = await login(loginIdentifier, loginPassword);
       if (result.success) {
-        toast({ title: 'تم تسجيل الدخول', description: 'مرحباً بك مجدداً في واصل' });
+        toast({ title: 'تم تسجيل الدخول', description: 'مرحباً بك مجدداً في طمطوم' });
         setLocation('/');
       } else {
         setError(result.message);
@@ -205,14 +224,21 @@ export default function CustomerAuthPage() {
     setLoading(true);
     setError('');
     try {
+      const phoneValidation = validateSaudiPhone(regPhone);
+      if (!phoneValidation.valid) {
+        setError(phoneValidation.error || 'رقم الهاتف غير صحيح');
+        setLoading(false);
+        return;
+      }
+      const normalizedPhone = phoneValidation.normalized;
       const result = await register({
         name: regName,
-        phone: regPhone,
+        phone: normalizedPhone,
         password: regPassword,
-        username: regPhone,
+        username: normalizedPhone,
       });
       if (result.success) {
-        toast({ title: 'تم إنشاء الحساب', description: 'مرحباً بك في واصل، تم إنشاء حسابك بنجاح' });
+        toast({ title: 'تم إنشاء الحساب', description: 'مرحباً بك في طمطوم، تم إنشاء حسابك بنجاح' });
         setLocation('/');
       } else {
         setError(result.message);
@@ -228,7 +254,7 @@ export default function CustomerAuthPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 py-12" dir="rtl">
       <div className="mb-8 text-center">
         <div className="text-5xl md:text-6xl mb-4 flex justify-center font-black">
-          <span className="text-[#ec3714]">واصل</span>
+          <span className="text-[#ec3714]">طمطوم</span>
         </div>
         <p className="text-muted-foreground font-bold">لخدمات التوصيل</p>
       </div>
@@ -403,12 +429,15 @@ export default function CustomerAuthPage() {
                       type="tel"
                       value={regPhone}
                       onChange={(e) => setRegPhone(e.target.value)}
-                      placeholder="77XXXXXXX"
+                      placeholder="05XXXXXXXX"
                       required
+                      maxLength={14}
                       className="pr-10 h-12 rounded-none border-2 focus-visible:ring-primary text-left"
                       dir="ltr"
+                      inputMode="tel"
                     />
                   </div>
+                  <p className="text-xs text-gray-500 mt-1">رقم الهاتف السعودي: مثال 0512345678</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="reg-pass" className="font-bold">كلمة المرور</Label>
@@ -446,7 +475,7 @@ export default function CustomerAuthPage() {
       </Card>
 
       <p className="mt-8 text-sm text-muted-foreground max-w-xs text-center">
-        بتسجيلك في واصل، أنت توافق على شروط الخدمة وسياسة الخصوصية الخاصة بنا.
+        بتسجيلك في طمطوم، أنت توافق على شروط الخدمة وسياسة الخصوصية الخاصة بنا.
       </p>
     </div>
   );

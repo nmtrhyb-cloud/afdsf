@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation as useWouterLocation } from 'wouter';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowRight, Trash2, MapPin, Calendar, Clock, DollarSign, Plus, Minus, ShoppingCart, AlertCircle, WifiOff } from 'lucide-react';
+import { ArrowRight, Trash2, MapPin, Calendar, Clock, DollarSign, Plus, Minus, ShoppingCart, AlertCircle, WifiOff, Tag, CheckCircle, X } from 'lucide-react';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { LocationPicker, LocationData } from '@/components/LocationPicker';
 import { Button } from '@/components/ui/button';
@@ -55,6 +55,11 @@ export default function Cart() {
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
   const [showAppClosedOverlay, setShowAppClosedOverlay] = useState(false);
 
+  const [couponCode, setCouponCode] = useState('');
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponApplied, setCouponApplied] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
   const [orderForm, setOrderForm] = useState({
     customerName: user?.name || localStorage.getItem('customer_name') || '',
     customerPhone: user?.phone || localStorage.getItem('customer_phone') || '',
@@ -80,6 +85,19 @@ export default function Cart() {
     }
   }, [userLocation.position]);
 
+  // تحديث طريقة الدفع تلقائياً عند تغيير الإعدادات
+  useEffect(() => {
+    if (!settings) return;
+    const available = [
+      showCashPayment && 'cash',
+      showMasalerPayment && 'masaler',
+      showBankTransfer && 'bank_transfer',
+    ].filter(Boolean) as string[];
+    if (available.length > 0 && !available.includes(orderForm.paymentMethod)) {
+      setOrderForm(prev => ({ ...prev, paymentMethod: available[0] }));
+    }
+  }, [showCashPayment, showMasalerPayment, showBankTransfer, settings]);
+
   const { data: restaurant } = useQuery<Restaurant>({
     queryKey: [`/api/restaurants/${restaurantId}`],
     enabled: !!restaurantId,
@@ -102,6 +120,23 @@ export default function Cart() {
     const enabled = (settings as any[])?.find((s: any) => s.key === 'enable_scheduled_orders')?.value !== 'false';
     return { start, end, scheduledOrdersEnabled: enabled };
   }, [settings]);
+
+  const getSetting = (key: string) => (settings as any[])?.find((s: any) => s.key === key)?.value;
+
+  const showCashPayment = getSetting('show_cash_payment') !== 'false';
+  const showMasalerPayment = getSetting('show_masaler_payment') === 'true';
+  const showBankTransfer = getSetting('show_bank_transfer') === 'true';
+  const showCouponField = getSetting('show_coupon_field') !== 'false';
+  const couponMinOrder = parseFloat(getSetting('coupon_min_order_value') || '0');
+  const shouldShowCoupon = showCouponField && subtotal >= couponMinOrder;
+
+  const availablePaymentMethods = [
+    showCashPayment && { value: 'cash', label: 'نقداً عند الاستلام', icon: '💵' },
+    showMasalerPayment && { value: 'masaler', label: 'ماسلر', icon: '📱' },
+    showBankTransfer && { value: 'bank_transfer', label: 'تحويل بنكي', icon: '🏦' },
+  ].filter(Boolean) as { value: string; label: string; icon: string }[];
+
+  const finalTotal = Math.max(0, subtotal + deliveryFee - couponDiscount);
 
   const restaurantStatus = useMemo(() => {
     if (!restaurant) return null;
@@ -145,6 +180,46 @@ export default function Cart() {
         });
       }
     }
+  };
+
+  const validateCouponMutation = useMutation({
+    mutationFn: async (code: string) => {
+      const response = await apiRequest('POST', '/api/coupons/validate', {
+        code,
+        orderValue: subtotal,
+        userId: user?.id,
+        userPhone: orderForm.customerPhone,
+      });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.valid) {
+        setCouponDiscount(data.discountAmount || 0);
+        setCouponApplied(true);
+        setCouponError('');
+        toast({ title: '✅ تم تطبيق الكوبون', description: `خصم ${formatCurrency(data.discountAmount || 0)}` });
+      } else {
+        setCouponError(data.message || 'الكوبون غير صالح أو منتهي الصلاحية');
+        setCouponDiscount(0);
+        setCouponApplied(false);
+      }
+    },
+    onError: () => {
+      setCouponError('خطأ في التحقق من الكوبون، يرجى المحاولة مرة أخرى');
+    },
+  });
+
+  const handleApplyCoupon = () => {
+    if (!couponCode.trim()) return;
+    setCouponError('');
+    validateCouponMutation.mutate(couponCode.trim());
+  };
+
+  const handleRemoveCoupon = () => {
+    setCouponCode('');
+    setCouponDiscount(0);
+    setCouponApplied(false);
+    setCouponError('');
   };
 
   const placeOrderMutation = useMutation({
@@ -224,8 +299,10 @@ export default function Cart() {
     items: JSON.stringify(items),
     subtotal: subtotal.toString(),
     deliveryFee: deliveryFee.toString(),
-    total: (subtotal + deliveryFee).toString(),
-    totalAmount: (subtotal + deliveryFee).toString(),
+    discount: couponDiscount.toString(),
+    couponCode: couponApplied ? couponCode : undefined,
+    total: finalTotal.toString(),
+    totalAmount: finalTotal.toString(),
     restaurantId: restaurantId || null,
     status: overrides?.status || 'pending',
     orderNumber: `ORD${Date.now()}`,
@@ -355,7 +432,7 @@ export default function Cart() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-right">تأكيد الطلب</AlertDialogTitle>
             <AlertDialogDescription className="text-right">
-              هل أنت متأكد من رغبتك في إرسال هذا الطلب بإجمالي {formatCurrency(subtotal + deliveryFee)}؟
+              هل أنت متأكد من رغبتك في إرسال هذا الطلب بإجمالي {formatCurrency(finalTotal)}؟
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row gap-2 justify-end">
@@ -380,8 +457,8 @@ export default function Cart() {
         <div className="flex items-center justify-between mb-8 border-b pb-4">
           <div className="flex items-center gap-3">
             <div className="text-3xl font-black tracking-tighter flex items-center gap-2">
-              <span className="text-primary">واصل</span>
-              <span className="text-[10px] font-bold text-primary/70 tracking-[0.3em] border border-primary/30 rounded px-1.5 py-0.5">WASEL</span>
+              <span className="text-primary">طمطوم</span>
+              <span className="text-[10px] font-bold text-primary/70 tracking-[0.3em] border border-primary/30 rounded px-1.5 py-0.5">TAM TOM</span>
             </div>
             <h1 className="text-3xl font-black uppercase tracking-tighter"> - السلة</h1>
           </div>
@@ -622,38 +699,80 @@ export default function Cart() {
                   <h3 className="font-semibold text-gray-800">طريقة الدفع</h3>
                 </div>
 
-                <RadioGroup 
-                  value={orderForm.paymentMethod} 
-                  onValueChange={(value) => setOrderForm(prev => ({ ...prev, paymentMethod: value }))}
-                  className="space-y-3"
-                >
-                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                    <RadioGroupItem value="cash" id="cash" />
-                    <Label htmlFor="cash" className="flex-1 cursor-pointer">
-                      الدفع عند الاستلام
-                    </Label>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                    <RadioGroupItem value="wallet" id="wallet" />
-                    <Label htmlFor="wallet" className="flex-1 cursor-pointer">
-                      الدفع من رصيد
-                    </Label>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                    <RadioGroupItem value="digital" id="digital" />
-                    <Label htmlFor="digital" className="flex-1 cursor-pointer">
-                      الدفع باستخدام المحفظة الإلكترونية
-                    </Label>
-                  </div>
-                </RadioGroup>
-
-                <Button className="w-full mt-4 bg-orange-500 hover:bg-orange-600 text-white font-medium py-3">
-                  إضافة رصيد
-                </Button>
+                {availablePaymentMethods.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-2">لا توجد طرق دفع متاحة حالياً</p>
+                ) : (
+                  <RadioGroup 
+                    value={orderForm.paymentMethod} 
+                    onValueChange={(value) => setOrderForm(prev => ({ ...prev, paymentMethod: value }))}
+                    className="space-y-3"
+                  >
+                    {availablePaymentMethods.map((method) => (
+                      <div key={method.value} className={`flex items-center space-x-2 rtl:space-x-reverse p-3 rounded-lg border-2 cursor-pointer transition-all ${orderForm.paymentMethod === method.value ? 'border-primary bg-primary/5' : 'border-gray-200 hover:border-gray-300'}`}
+                        onClick={() => setOrderForm(prev => ({ ...prev, paymentMethod: method.value }))}>
+                        <RadioGroupItem value={method.value} id={method.value} />
+                        <Label htmlFor={method.value} className="flex-1 cursor-pointer flex items-center gap-2">
+                          <span className="text-xl">{method.icon}</span>
+                          <span className="font-medium">{method.label}</span>
+                        </Label>
+                      </div>
+                    ))}
+                  </RadioGroup>
+                )}
               </CardContent>
             </Card>
+
+            {/* كوبون الخصم */}
+            {shouldShowCoupon && (
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Tag className="h-5 w-5 text-primary" />
+                    <h3 className="font-semibold text-gray-800">كوبون الخصم</h3>
+                  </div>
+                  {couponApplied ? (
+                    <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                        <div>
+                          <p className="font-bold text-green-800">{couponCode}</p>
+                          <p className="text-sm text-green-700">خصم {formatCurrency(couponDiscount)}</p>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={handleRemoveCoupon} className="text-red-500 hover:text-red-700 h-8 w-8 p-0">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="أدخل كود الخصم"
+                        value={couponCode}
+                        onChange={(e) => { setCouponCode(e.target.value.toUpperCase()); setCouponError(''); }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleApplyCoupon()}
+                        className="flex-1 text-left"
+                        dir="ltr"
+                        data-testid="input-coupon-code"
+                      />
+                      <Button 
+                        onClick={handleApplyCoupon}
+                        disabled={!couponCode.trim() || validateCouponMutation.isPending}
+                        className="bg-primary hover:bg-primary/90 text-white px-4"
+                        data-testid="button-apply-coupon"
+                      >
+                        {validateCouponMutation.isPending ? '...' : 'تطبيق'}
+                      </Button>
+                    </div>
+                  )}
+                  {couponError && (
+                    <p className="text-sm text-red-600 mt-2 flex items-center gap-1">
+                      <AlertCircle className="h-4 w-4" />
+                      {couponError}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* ملخص الطلب النهائي */}
             <Card>
@@ -672,20 +791,31 @@ export default function Cart() {
                       {formatCurrency(deliveryFee)}
                     </span>
                   </div>
+
+                  {couponDiscount > 0 && (
+                    <div className="flex justify-between items-center text-green-700">
+                      <span className="flex items-center gap-1">
+                        <Tag className="h-4 w-4" />
+                        خصم الكوبون ({couponCode})
+                      </span>
+                      <span className="font-bold" data-testid="text-coupon-discount">
+                        -{formatCurrency(couponDiscount)}
+                      </span>
+                    </div>
+                  )}
                   
                   <div className="flex justify-between items-center pt-2 border-t">
                     <span className="text-gray-800 font-semibold">الإجمالي</span>
                     <span className="text-xl font-bold text-black" data-testid="text-total">
-                      {formatCurrency(subtotal + deliveryFee)}
+                      {formatCurrency(finalTotal)}
                     </span>
                   </div>
                   
-                  <div className="text-sm text-gray-500 text-center">
-                    يرجى تحديد عنوان التوصيل لاحتساب سعر التوصيل
-                    <Button variant="link" className="text-blue-500 p-0 h-auto text-sm">
-                      إعادة المحاولة
-                    </Button>
-                  </div>
+                  {!orderForm.locationData && (
+                    <div className="text-sm text-gray-500 text-center">
+                      يرجى تحديد عنوان التوصيل لاحتساب سعر التوصيل
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

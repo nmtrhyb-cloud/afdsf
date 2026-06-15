@@ -498,6 +498,12 @@ export default function AdminUiSettings() {
                 description="عرض خيار الدفع نقداً عند الاستلام"
               />
               <SettingRow
+                label="إظهار الدفع عبر ماسلر"
+                {...rowProps('show_masaler_payment')}
+                type="boolean"
+                description="عرض خيار الدفع عبر تطبيق ماسلر"
+              />
+              <SettingRow
                 label="إظهار التحويل البنكي"
                 {...rowProps('show_bank_transfer')}
                 type="boolean"
