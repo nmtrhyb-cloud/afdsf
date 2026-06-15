@@ -89,7 +89,7 @@ export function LocationPermissionModal({ onPermissionGranted, onPermissionDenie
             السماح بالوصول للموقع
           </DialogTitle>
           <DialogDescription className="text-center text-muted-foreground">
-            نحتاج إلى معرفة موقعك لتوصيل طلباتك بدقة وعرض المطاعم القريبة منك
+            نحتاج إلى معرفة موقعك لحساب رسوم التوصيل وضمان وصول طلبك في الوقت المحدد
           </DialogDescription>
         </DialogHeader>
 
@@ -106,8 +106,8 @@ export function LocationPermissionModal({ onPermissionGranted, onPermissionDenie
             <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5">
               <MapPin className="h-5 w-5 text-primary flex-shrink-0" />
               <div className="text-sm">
-                <div className="font-medium">عرض المطاعم القريبة</div>
-                <div className="text-muted-foreground">اكتشف أفضل المطاعم في منطقتك</div>
+                <div className="font-medium">حساب رسوم التوصيل</div>
+                <div className="text-muted-foreground">نحسب التكلفة بدقة من متجر طمطوم إليك</div>
               </div>
             </div>
 
