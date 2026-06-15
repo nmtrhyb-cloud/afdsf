@@ -11,28 +11,16 @@ import { UiSettingsProvider, useUiSettings } from "./context/UiSettingsContext";
 import { NotificationProvider } from "./context/NotificationContext";
 import { LocationPermissionModal } from "./components/LocationPermissionModal";
 import Layout from "./components/Layout";
-import { AdminLayout } from "./components/admin/AdminLayout";
 import FloatingCartNotification from "./components/FloatingCartNotification";
-import { LoginPage } from "./pages/LoginPage";
 import AdminLoginPage from "./pages/admin/AdminLoginPage";
 import DriverLoginPage from "./pages/driver/DriverLoginPage";
 import AdminApp from "./pages/AdminApp";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminDeliveryFees from "./pages/admin/AdminDeliveryFees";
-import AdminUiSettings from "./pages/admin/AdminUiSettings";
-import AdvancedReports from "./pages/admin/AdvancedReports";
-import RestaurantReports from "./pages/admin/RestaurantReports";
-import AdminDriversAdvanced from "./pages/AdminDriversAdvanced";
-import AdminFinancialReports from "./pages/AdminFinancialReports";
-import AdminHRManagement from "./pages/AdminHRManagement";
-import AdminRestaurantsAdvanced from "./pages/AdminRestaurantsAdvanced";
-import AdminSecurity from "./pages/AdminSecurity";
-import RatingsManagement from "./pages/RatingsManagement";
-import WalletManagement from "./pages/WalletManagement";
 import DriverAppPage from "./pages/driver/DriverApp";
-import { useState } from "react";
-import Home from "./pages/Home";
-import Restaurant from "./pages/Restaurant";
+import { useState, useEffect } from "react";
+import { useSettingsSync } from "./hooks/useSettingsSync";
+import { prefetchBootstrap } from "./lib/bootstrap";
+import HomePage from "./pages/HomePage";
+import RestaurantPage from "./pages/RestaurantPage";
 import Cart from "./pages/Cart";
 import Profile from "./pages/Profile";
 import Location from "./pages/Location";
@@ -48,6 +36,7 @@ import NotFound from "@/pages/not-found";
 import SplashScreen from "./components/SplashScreen";
 
 function MainApp() {
+  useSettingsSync();
   const { location: userLocation } = useUserLocation();
   const [currentLocation, setLocation] = useWouterLocation();
   const [showLocationModal, setShowLocationModal] = useState(true);
@@ -58,7 +47,16 @@ function MainApp() {
     return localStorage.getItem('is_guest') === 'true';
   });
 
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+
+  // Pre-warm caches on cold start (covers users who already saw splash this session)
+  useEffect(() => {
+    if (!showSplash) {
+      const phone = user?.phone || localStorage.getItem('customer_phone') || '';
+      const customerId = user?.id || '';
+      prefetchBootstrap({ phone, customerId });
+    }
+  }, [showSplash, user?.id, user?.phone]);
 
   // Handle splash finish
   const handleSplashFinish = () => {
@@ -73,13 +71,19 @@ function MainApp() {
 
   const isAdminRoute = currentLocation.startsWith('/admin');
   const isDriverRoute = currentLocation.startsWith('/driver');
+  const needsRedirectToAuth = !isAuthenticated && !isGuest && !isAuthPage && !isAdminRoute && !isDriverRoute;
+
+  useEffect(() => {
+    if (needsRedirectToAuth) {
+      setLocation('/auth');
+    }
+  }, [needsRedirectToAuth]);
 
   if (showSplash && !isAdminRoute && !isDriverRoute && !isAuthPage) {
     return <SplashScreen onFinish={handleSplashFinish} />;
   }
 
-  if (!isAuthenticated && !isGuest && !isAuthPage && !currentLocation.startsWith('/admin') && !currentLocation.startsWith('/driver')) {
-    setLocation('/auth');
+  if (needsRedirectToAuth) {
     return null;
   }
 
@@ -92,28 +96,9 @@ function MainApp() {
     return <DriverLoginPage />;
   }
 
-  // Handle admin routes
+  // Handle admin routes - AdminApp handles its own AdminLayout internally
   if (currentLocation.startsWith('/admin')) {
-    return (
-      <AdminLayout>
-        <Switch>
-          <Route path="/admin" component={AdminApp} />
-          <Route path="/admin/dashboard" component={AdminDashboard} />
-          <Route path="/admin/delivery-fees" component={AdminDeliveryFees} />
-          <Route path="/admin/ui-settings" component={AdminUiSettings} />
-          <Route path="/admin/advanced-reports" component={AdvancedReports} />
-          <Route path="/admin/restaurant-reports" component={RestaurantReports} />
-          <Route path="/admin/drivers-advanced" component={AdminDriversAdvanced} />
-          <Route path="/admin/financial-reports" component={AdminFinancialReports} />
-          <Route path="/admin/hr-management" component={AdminHRManagement} />
-          <Route path="/admin/restaurants-advanced" component={AdminRestaurantsAdvanced} />
-          <Route path="/admin/security" component={AdminSecurity} />
-          <Route path="/admin/ratings" component={RatingsManagement} />
-          <Route path="/admin/wallet" component={WalletManagement} />
-          <Route path="/admin/:rest*" component={AdminApp} />
-        </Switch>
-      </AdminLayout>
-    );
+    return <AdminApp />;
   }
 
   // Handle driver routes
@@ -149,6 +134,8 @@ import CategoryPage from "./pages/CategoryPage";
 import ProductDetails from "./pages/ProductDetails";
 import CustomerAuthPage from "./pages/CustomerAuthPage";
 import Favorites from "./pages/Favorites";
+import CustomerAddresses from "./pages/CustomerAddresses";
+import WasalniPage from "./pages/WasalniPage";
 
 function Router() {
   // Check UiSettings for page visibility
@@ -158,11 +145,11 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={HomePage} />
       <Route path="/search" component={SearchPage} />
       <Route path="/category/:slug" component={CategoryPage} />
       <Route path="/product/:id" component={ProductDetails} />
-      <Route path="/restaurant/:id" component={Restaurant} />
+      <Route path="/restaurant/:id" component={RestaurantPage} />
       <Route path="/cart" component={Cart} />
       <Route path="/profile" component={Profile} />
       <Route path="/auth" component={CustomerAuthPage} />
@@ -171,8 +158,10 @@ function Router() {
       <Route path="/orders" component={OrdersPage} />
       <Route path="/orders/:orderId" component={OrderTrackingPage} />
       {showTrackOrdersPage && <Route path="/track-orders" component={TrackOrdersPage} />}
+      <Route path="/my-addresses" component={CustomerAddresses} />
       <Route path="/settings" component={Settings} />
       <Route path="/privacy" component={Privacy} />
+      <Route path="/wasalni" component={WasalniPage} />
       
       {/* Authentication Routes */}
       <Route path="/admin-login" component={AdminLoginPage} />
