@@ -22,6 +22,7 @@ interface AuthState {
 // نوع السياق
 interface AuthContextType extends AuthState {
   login: (identifier: string, password: string, userType?: 'customer' | 'driver' | 'admin') => Promise<{ success: boolean; message: string }>;
+  register: (userData: any) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -142,6 +143,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const register = async (userData: any): Promise<{ success: boolean; message: string }> => {
+    try {
+      setAuthState(prev => ({ ...prev, loading: true }));
+
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userData),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        localStorage.setItem('auth_token', result.token);
+        setAuthState({
+          isAuthenticated: true,
+          user: result.user,
+          token: result.token,
+          loading: false,
+        });
+        return { success: true, message: result.message || 'تم إنشاء الحساب بنجاح' };
+      } else {
+        setAuthState(prev => ({ ...prev, loading: false }));
+        return { success: false, message: result.message || 'فشل في إنشاء الحساب' };
+      }
+    } catch (error) {
+      console.error('خطأ في التسجيل:', error);
+      setAuthState(prev => ({ ...prev, loading: false }));
+      return { success: false, message: 'حدث خطأ غير متوقع' };
+    }
+  };
+
   const logout = async () => {
     try {
       const token = authState.token;
@@ -171,6 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value: AuthContextType = {
     ...authState,
     login,
+    register,
     logout,
     refreshUser,
   };

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 interface UiSetting {
   id: string;
@@ -23,7 +23,7 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async (isInitial = false) => {
     try {
       const response = await fetch('/api/admin/ui-settings');
       if (response.ok) {
@@ -37,27 +37,27 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('خطأ في تحميل إعدادات الواجهة:', error);
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   const updateSetting = async (key: string, value: string) => {
     try {
+      const adminToken = localStorage.getItem('admin_token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (adminToken) {
+        headers['Authorization'] = `Bearer ${adminToken}`;
+      }
       const response = await fetch(`/api/admin/ui-settings/${key}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ value }),
       });
 
       if (response.ok) {
         setSettings(prev => ({ ...prev, [key]: value }));
-        
-        // إشعار جميع المكونات بالتحديث
-        window.dispatchEvent(new CustomEvent('uiSettingsChanged', {
-          detail: { key, value }
-        }));
       }
     } catch (error) {
       console.error('خطأ في تحديث الإعداد:', error);
@@ -65,21 +65,26 @@ export function UiSettingsProvider({ children }: { children: React.ReactNode }) 
   };
 
   const getSetting = (key: string, defaultValue: string = '') => {
-    return settings[key] || defaultValue;
+    return settings[key] !== undefined ? settings[key] : defaultValue;
   };
 
   const isFeatureEnabled = (key: string) => {
-    return getSetting(key) === 'true';
+    const value = getSetting(key);
+    if (value === '') return true;
+    return value !== 'false';
   };
 
   const refreshSettings = async () => {
     setLoading(true);
-    await loadSettings();
+    await loadSettings(true);
   };
 
   useEffect(() => {
-    loadSettings();
-  }, []);
+    loadSettings(true);
+    // تحديث الإعدادات كل 30 ثانية لاستلام التغييرات من لوحة التحكم
+    const interval = setInterval(() => loadSettings(false), 30000);
+    return () => clearInterval(interval);
+  }, [loadSettings]);
 
   return (
     <UiSettingsContext.Provider value={{
