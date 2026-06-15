@@ -257,10 +257,36 @@ router.post('/validate', async (req, res) => {
   }
 });
 
+function normalizeSaudiPhone(phone: string): string | null {
+  const cleaned = phone.replace(/[\s\-\(\)]/g, '');
+  let normalized = cleaned;
+  if (cleaned.startsWith('+9665')) normalized = '0' + cleaned.slice(4);
+  else if (cleaned.startsWith('009665')) normalized = '0' + cleaned.slice(5);
+  else if (cleaned.startsWith('9665')) normalized = '0' + cleaned.slice(3);
+  else if (cleaned.startsWith('5') && cleaned.length === 9) normalized = '0' + cleaned;
+  if (/^05[0-9]{8}$/.test(normalized)) return normalized;
+  return null;
+}
+
 // تسجيل عميل جديد
 router.post('/register', async (req, res) => {
   try {
     const validatedData = insertUserSchema.parse(req.body);
+
+    // التحقق من صحة رقم الهاتف السعودي
+    if (validatedData.phone) {
+      const normalized = normalizeSaudiPhone(validatedData.phone);
+      if (!normalized) {
+        return res.status(400).json({
+          success: false,
+          message: 'يجب إدخال رقم هاتف سعودي صحيح (مثال: 0512345678)'
+        });
+      }
+      validatedData.phone = normalized;
+      if (validatedData.username === req.body.phone) {
+        validatedData.username = normalized;
+      }
+    }
 
     // التحقق من الحد الأدنى لطول كلمة المرور
     if (!validatedData.password || validatedData.password.length < 6) {
