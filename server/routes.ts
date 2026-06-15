@@ -7,7 +7,10 @@ import authRoutes from "./routes/auth";
 import { customerRoutes } from "./routes/customer";
 import driverRoutes from "./routes/driver";
 import ordersRoutes from "./routes/orders";
+import deliveryFeeRoutes from "./routes/delivery-fees";
 import { adminRoutes } from "./routes/admin";
+import { registerAdvancedRoutes } from "./routes/advanced";
+import { publicRoutes } from "./routes/public";
 import { 
   insertRestaurantSchema, 
   insertMenuItemSchema, 
@@ -34,8 +37,12 @@ import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
-  // تم حذف مسارات المصادقة - تم إزالة نظام المصادقة بالكامل
+  // Auth Routes
+  app.use("/api/auth", authRoutes);
 
+  // Admin and Advanced Routes
+  app.use("/api/admin", adminRoutes);
+  registerAdvancedRoutes(app);
 
   // Users
   app.get("/api/users/:id", async (req, res) => {
@@ -151,6 +158,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Restaurant write operations are only available through /api/admin/restaurants
 
   // Menu Items
+  app.get("/api/products", async (req, res) => {
+    try {
+      const products = await storage.getAllMenuItems();
+      res.json(products);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
+  app.get("/api/products/featured", async (req, res) => {
+    try {
+      const products = await storage.getAllMenuItems();
+      const featured = products.filter(p => p.isFeatured);
+      res.json(featured.length > 0 ? featured : products.slice(0, 12));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch featured products" });
+    }
+  });
+
+  app.get("/api/products/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const item = await storage.getMenuItem(id);
+      if (!item) {
+        return res.status(404).json({ message: "المنتج غير موجود" });
+      }
+      res.json(item);
+    } catch (error) {
+      res.status(500).json({ message: "فشل في جلب بيانات المنتج" });
+    }
+  });
+
   app.get("/api/restaurants/:restaurantId/menu", async (req, res) => {
     try {
       const { restaurantId } = req.params;
@@ -163,165 +202,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Menu item write operations are only available through /api/admin/menu-items
 
-  // Orders
-  app.get("/api/orders", async (req, res) => {
-    try {
-      const { restaurantId } = req.query;
-      let orders;
-      
-      if (restaurantId) {
-        orders = await storage.getOrdersByRestaurant(restaurantId as string);
-      } else {
-        orders = await storage.getOrders();
-      }
-      
-      res.json(orders);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch orders" });
-    }
-  });
-
-  app.get("/api/orders/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const order = await storage.getOrder(id);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      res.json(order);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch order" });
-    }
-  });
-
-  // Orders routes are now handled by the dedicated orders router
-  // app.post("/api/orders", ...) - moved to routes/orders.ts
-
-  app.put("/api/orders/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      // التحقق من صحة معرف الطلب
-      if (!id || typeof id !== 'string') {
-        return res.status(400).json({ message: "معرف الطلب غير صحيح" });
-      }
-      
-      const validatedData = insertOrderSchema.partial().parse(req.body);
-      const order = await storage.updateOrder(id, validatedData);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      
-      // إنشاء إشعار عند تحديث حالة الطلب
-      if (validatedData.status) {
-        try {
-          let statusMessage = '';
-          switch (validatedData.status) {
-            case 'confirmed':
-              statusMessage = 'تم تأكيد طلبك وجاري التحضير';
-              break;
-            case 'preparing':
-              statusMessage = 'جاري تحضير طلبك';
-              break;
-            case 'on_way':
-              statusMessage = 'طلبك في الطريق إليك';
-              break;
-            case 'delivered':
-              statusMessage = 'تم تسليم طلبك بنجاح';
-              break;
-            case 'cancelled':
-              statusMessage = 'تم إلغاء طلبك';
-              break;
-            default:
-              statusMessage = `تم تحديث حالة طلبك إلى ${validatedData.status}`;
-          }
-          
-          await storage.createNotification({
-            type: 'order_update',
-            title: 'تحديث حالة الطلب',
-            message: statusMessage,
-            recipientType: 'customer',
-            recipientId: order.customerPhone,
-            orderId: order.id
-          });
-        } catch (notificationError) {
-          console.error('خطأ في إنشاء الإشعار:', notificationError);
-        }
-      }
-      
-      res.json(order);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid order data" });
-    }
-  });
-
-  // Drivers
-  app.get("/api/drivers", async (req, res) => {
-    try {
-      const { available } = req.query;
-      let drivers;
-      
-      if (available === 'true') {
-        drivers = await storage.getAvailableDrivers();
-      } else {
-        drivers = await storage.getDrivers();
-      }
-      
-      res.json(drivers);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch drivers" });
-    }
-  });
-
-  app.get("/api/drivers/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const driver = await storage.getDriver(id);
-      if (!driver) {
-        return res.status(404).json({ message: "Driver not found" });
-      }
-      res.json(driver);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch driver" });
-    }
-  });
-
-  app.post("/api/drivers", async (req, res) => {
-    try {
-      const validatedData = insertDriverSchema.parse(req.body);
-      const driver = await storage.createDriver(validatedData);
-      res.status(201).json(driver);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid driver data" });
-    }
-  });
-
-  app.put("/api/drivers/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertDriverSchema.partial().parse(req.body);
-      const driver = await storage.updateDriver(id, validatedData);
-      if (!driver) {
-        return res.status(404).json({ message: "Driver not found" });
-      }
-      res.json(driver);
-    } catch (error) {
-      res.status(400).json({ message: "Invalid driver data" });
-    }
-  });
-
-  app.delete("/api/drivers/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const success = await storage.deleteDriver(id);
-      if (!success) {
-        return res.status(404).json({ message: "Driver not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete driver" });
-    }
-  });
+  // Orders routes are now handled by the dedicated orders router in routes/orders.ts at the bottom
+  // Drivers routes are now handled by the dedicated driver router in routes/driver.ts at the bottom
 
   // Special Offers
   app.get("/api/special-offers", async (req, res) => {
@@ -351,6 +233,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Special offer write operations are only available through /api/admin/special-offers
+
+  // Favorites Routes
+  app.get("/api/favorites/restaurants/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const favorites = await storage.getFavoriteRestaurants(userId);
+      res.json(favorites);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch favorite restaurants" });
+    }
+  });
+
+  app.get("/api/favorites/products/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const favorites = await storage.getFavoriteProducts(userId);
+      res.json(favorites);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch favorite products" });
+    }
+  });
+
+  app.post("/api/favorites", async (req, res) => {
+    try {
+      const validatedData = insertFavoritesSchema.parse(req.body);
+      const favorite = await storage.addToFavorites(validatedData);
+      res.status(201).json(favorite);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid favorite data" });
+    }
+  });
+
+  app.delete("/api/favorites", async (req, res) => {
+    try {
+      const { userId, restaurantId, menuItemId } = req.query;
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      const success = await storage.removeFromFavorites(userId as string, restaurantId as string, menuItemId as string);
+      if (success) {
+        res.status(204).send();
+      } else {
+        res.status(404).json({ message: "Favorite not found" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove favorite" });
+    }
+  });
+
+  app.get("/api/favorites/check", async (req, res) => {
+    try {
+      const { userId, restaurantId, menuItemId } = req.query;
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      
+      let isFavorite = false;
+      if (restaurantId) {
+        isFavorite = await storage.isRestaurantFavorite(userId as string, restaurantId as string);
+      } else if (menuItemId) {
+        isFavorite = await storage.isProductFavorite(userId as string, menuItemId as string);
+      }
+      
+      res.json({ isFavorite });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check favorite" });
+    }
+  });
 
   // UI Settings Routes
   app.get("/api/ui-settings", async (req, res) => {
@@ -485,65 +435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Driver-specific endpoints
-  // Get driver available orders
-  app.get("/api/drivers/:id/available-orders", async (req, res) => {
-    try {
-      const orders = await storage.getOrders();
-      const availableOrders = orders.filter(order => 
-        (order.status === 'confirmed' && !order.driverId) ||
-        (order.status === 'pending' && !order.driverId)
-      );
-      res.json(availableOrders);
-    } catch (error) {
-      console.error('Error fetching available orders:', error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Get orders by driverId
-  app.get("/api/orders", async (req, res) => {
-    try {
-      const { driverId } = req.query;
-      const orders = await storage.getOrders();
-      
-      if (driverId) {
-        const driverOrders = orders.filter(order => order.driverId === driverId);
-        return res.json(driverOrders);
-      }
-      
-      res.json(orders);
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // Assign order to driver
-  app.put("/api/orders/:id/assign-driver", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { driverId } = req.body;
-      
-      if (!driverId) {
-        return res.status(400).json({ error: "Driver ID is required" });
-      }
-
-      const updatedOrder = await storage.updateOrder(id, {
-        driverId,
-        status: 'preparing'
-      });
-      
-      if (!updatedOrder) {
-        return res.status(404).json({ error: "Order not found" });
-      }
-      
-      res.json({ success: true, order: updatedOrder });
-    } catch (error) {
-      console.error('Error assigning driver:', error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
+  // Driver-specific order endpoints are handled in routes/orders.ts
 
   app.get("/api/drivers/:id/orders", async (req, res) => {
     try {
@@ -587,52 +479,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/drivers/:id/accept-order", async (req, res) => {
-    try {
-      const { id: driverId } = req.params;
-      const { orderId } = req.body;
-      
-      // Update order status and assign driver
-      const updatedOrder = await storage.updateOrder(orderId, {
-        driverId: driverId,
-        status: 'accepted',
-      });
-      
-      if (!updatedOrder) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      
-      // Update driver availability
-      await storage.updateDriver(driverId, { isAvailable: false });
-      
-      res.json(updatedOrder);
-    } catch (error) {
-      res.status(400).json({ message: "Failed to accept order" });
-    }
-  });
-
-  app.post("/api/drivers/:id/complete-order", async (req, res) => {
-    try {
-      const { id: driverId } = req.params;
-      const { orderId } = req.body;
-      
-      // Update order status
-      const updatedOrder = await storage.updateOrder(orderId, {
-        status: 'delivered',
-      });
-      
-      if (!updatedOrder) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      
-      // Update driver availability
-      await storage.updateDriver(driverId, { isAvailable: true });
-      
-      res.json(updatedOrder);
-    } catch (error) {
-      res.status(400).json({ message: "Failed to complete order" });
-    }
-  });
+  // Driver dashboard routes
 
   app.get("/api/drivers/:id/stats", async (req, res) => {
     try {
@@ -712,31 +559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/drivers/:id/available-orders", async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      // Get orders that are pending and without assigned driver
-      const allOrders = await storage.getOrders();
-      const availableOrders = allOrders
-        .filter(order => order.status === 'pending' && !order.driverId)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 10)
-        .map(order => ({
-          id: order.id,
-          totalAmount: order.totalAmount,
-          status: order.status,
-          createdAt: order.createdAt,
-          deliveryAddress: order.deliveryAddress,
-          restaurantId: order.restaurantId,
-          customerName: order.customerName,
-        }));
-      
-      res.json(availableOrders);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch available orders" });
-    }
-  });
+  // Available orders for drivers are handled in routes/orders.ts
 
   // ================= RESTAURANT SECTIONS API - DISABLED =================
   // Restaurant sections functionality temporarily disabled - would require additional database methods
@@ -745,19 +568,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Ratings functionality temporarily disabled - would require additional database methods
 
   // ================= NOTIFICATIONS API =================
-  app.get("/api/notifications", async (req, res) => {
-    try {
-      const { recipientType, recipientId, unread } = req.query;
-      const notifications = await storage.getNotifications(
-        recipientType as string, 
-        recipientId as string, 
-        unread === 'true'
-      );
-      res.json(notifications);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch notifications" });
-    }
-  });
+/*
+app.get("/api/notifications", async (req, res) => {
+  try {
+    const { recipientType, recipientId, unread } = req.query;
+    const notifications = await storage.getNotifications(
+      recipientType as string, 
+      recipientId as string, 
+      unread === 'true'
+    );
+    res.json(notifications);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+});
+*/
 
   app.post("/api/notifications", async (req, res) => {
     try {
@@ -889,17 +714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userLongitude: userLocation?.lon,
           radius: radius ? parseFloat(radius as string) : undefined
         };
-        // TEMPORARY FIX: Return sample data for search
-        console.log('TEMPORARY FIX: Returning sample restaurants for search');
-        results.restaurants = [
-          {
-            id: '1',
-            name: 'مطعم الأصالة',
-            description: 'مطعم يقدم أشهى الأطباق العربية الأصيلة',
-            image: '/images/restaurant1.jpg',
-            rating: '4.5'
-          }
-        ];
+        results.restaurants = await storage.getRestaurants(filters);
       }
       
       if (!type || type === 'categories') {
@@ -1055,64 +870,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register customer routes
   app.use("/api/customer", customerRoutes);
   
-  // Register driver routes
-  app.use("/api/driver", driverRoutes);
+  // Register driver routes (plural for consistency)
+  app.use("/api/drivers", driverRoutes);
   
   // Register orders routes
   app.use("/api/orders", ordersRoutes);
 
-  const httpServer = createServer(app);
-  
-  // WebSocket للتحديثات الفورية
-  const WebSocket = require('ws');
-  const wss = new WebSocket.Server({ server: httpServer });
-  
-  // تخزين الاتصالات النشطة
-  const activeConnections = new Map();
-  
-  wss.on('connection', (ws: any, req: any) => {
-    const connectionId = randomUUID();
-    activeConnections.set(connectionId, ws);
-    
-    console.log(`🔗 اتصال WebSocket جديد: ${connectionId}`);
-    
-    ws.on('message', (message: string) => {
-      try {
-        const data = JSON.parse(message);
-        
-        // تسجيل نوع المستخدم والمعرف للاتصال
-        if (data.type === 'register') {
-          ws.userType = data.userType; // 'admin', 'driver', 'customer'
-          ws.userId = data.userId;
-          console.log(`📝 تم تسجيل المستخدم: ${data.userType} - ${data.userId}`);
-        }
-      } catch (error) {
-        console.error('خطأ في معالجة رسالة WebSocket:', error);
-      }
-    });
-    
-    ws.on('close', () => {
-      activeConnections.delete(connectionId);
-      console.log(`❌ انقطع اتصال WebSocket: ${connectionId}`);
-    });
+  // Register delivery fee routes
+  app.use("/api/delivery-fees", deliveryFeeRoutes);
+
+  // Register public routes (including Flutter API)
+  app.use("/api", publicRoutes);
+
+  // Enhanced notifications endpoint
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const { recipientType, recipientId, unread } = req.query;
+      const notifications = await storage.getNotifications(
+        recipientType as string, 
+        recipientId as string, 
+        unread === 'true'
+      );
+      res.json(notifications);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
   });
-  
-  // دالة لإرسال التحديثات للمستخدمين
-  const broadcastUpdate = (type: string, data: any, targetUserType?: string, targetUserId?: string) => {
-    activeConnections.forEach((ws: any) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        // إرسال للمستخدمين المحددين أو للجميع
-        if (!targetUserType || ws.userType === targetUserType) {
-          if (!targetUserId || ws.userId === targetUserId) {
-            ws.send(JSON.stringify({ type, data }));
-          }
+
+  // Mark notification as read
+  app.put("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (storage.constructor.name === "MemStorage") {
+        const notifications = await storage.getNotifications();
+        const notification = notifications.find((n: any) => n.id === id);
+        if (notification) {
+          (notification as any).isRead = true;
+          res.json(notification);
+        } else {
+          res.status(404).json({ message: "Notification not found" });
+        }
+      } else {
+        const notification = await (storage as any).markNotificationAsRead(id);
+        if (!notification) {
+          return res.status(404).json({ message: "Notification not found" });
+        }
+        res.json(notification);
+      }
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      res.status(500).json({ message: "Failed to update notification" });
+    }
+  });
+
+  app.put("/api/notifications/customer/mark-all-read", async (req, res) => {
+    try {
+      const { phone, customerId } = req.body;
+      if (!phone && !customerId) {
+        return res.status(400).json({ message: "phone or customerId required" });
+      }
+
+      const all = await storage.getNotifications();
+      const target =
+        all.filter((n: any) => {
+          if (n.recipientType !== "customer") return false;
+          if (customerId && n.recipientId === customerId) return true;
+          if (phone && n.recipientId === phone) return true;
+          return false;
+        }) || [];
+
+      if ((storage as any).markNotificationAsRead) {
+        await Promise.all(target.map((n: any) => (storage as any).markNotificationAsRead(n.id)));
+      } else {
+        for (const n of target) {
+          (n as any).isRead = true;
         }
       }
-    });
-  };
-  
-  // إضافة broadcastUpdate للسياق العام
-  (global as any).broadcastUpdate = broadcastUpdate;
-  
+
+      res.json({ success: true, updated: target.length });
+    } catch (error) {
+      console.error("Error marking all read:", error);
+      res.status(500).json({ message: "Failed to mark all as read" });
+    }
+  });
+
+  app.get("/api/notifications/customer", async (req, res) => {
+    try {
+      const { phone, customerId } = req.query;
+      const notifications = await storage.getNotifications("customer", (customerId as string) || (phone as string));
+      res.json(notifications);
+    } catch (error) {
+      console.error("Error fetching customer notifications:", error);
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      await (storage as any).deleteNotification?.(id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting notification:", error);
+      res.status(500).json({ message: "Failed to delete notification" });
+    }
+  });
+
+  // Public Payment Methods Route
+  app.get("/api/payment-methods", async (req, res) => {
+    try {
+      const methods = await (storage as any).getActivePaymentMethods();
+      const methodsWithDocs = await Promise.all(methods.map(async (m: any) => {
+        const docs = await (storage as any).getPaymentMethodDocuments(m.id);
+        return { ...m, documents: docs };
+      }));
+      res.json(methodsWithDocs);
+    } catch (error) {
+      console.error("خطأ في جلب طرق الدفع:", error);
+      res.status(500).json({ error: "خطأ في الخادم" });
+    }
+  });
+
+  // Coupon Validation Route
+  app.post("/api/coupons/validate", async (req, res) => {
+    try {
+      const { code, orderValue, userId, userPhone } = req.body;
+      if (!code) return res.status(400).json({ error: "كود الكوبون مطلوب" });
+      if (!orderValue) return res.status(400).json({ error: "قيمة الطلب مطلوبة" });
+      const result = await (storage as any).validateCoupon(code, parseFloat(orderValue), userId, userPhone);
+      res.json(result);
+    } catch (error) {
+      console.error("خطأ في التحقق من الكوبون:", error);
+      res.status(500).json({ error: "خطأ في الخادم" });
+    }
+  });
+
+  const httpServer = createServer(app);
   return httpServer;
 }

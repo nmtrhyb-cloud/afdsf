@@ -1,18 +1,17 @@
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { setupWebSockets } from "./socket";
 import { setupVite, serveStatic, log } from "./viteServer";
-import { seedDefaultData } from "./seed";
+import { seedDefaultData, ensureDefaultSettings } from "./seed";
 import { storage } from "./storage";
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: false }));
 
-// Disable ETag caching to fix special offers not updating
 app.set('etag', false);
 
-// Disable all caching for API routes
 app.use('/api', (req, res, next) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.set('Pragma', 'no-cache');
@@ -52,6 +51,9 @@ app.use((req, res, next) => {
   try {
     const server = await registerRoutes(app);
 
+    const ws = setupWebSockets(server);
+    app.set('ws', ws);
+
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
@@ -59,10 +61,10 @@ app.use((req, res, next) => {
       throw err;
     });
 
-    // Seed database with default data if using DatabaseStorage
     if (storage.constructor.name === 'DatabaseStorage') {
       log('🌱 Seeding database with default data...');
       await seedDefaultData();
+      await ensureDefaultSettings();
     }
 
     if (app.get("env") === "development") {

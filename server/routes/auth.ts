@@ -2,10 +2,294 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import { dbStorage } from '../db';
-import { adminUsers, drivers } from '@shared/schema';
-import { eq, or } from 'drizzle-orm';
+import { adminUsers, drivers, users, insertUserSchema } from '@shared/schema';
+import { eq, or, sql } from 'drizzle-orm';
 
 const router = express.Router();
+
+// فحص حالة الإعداد الأولي - هل توجد حسابات في قاعدة البيانات؟
+router.get('/setup-status', async (req, res) => {
+  try {
+    const [adminCount] = await dbStorage.db.select({ count: sql<number>`count(*)::int` }).from(adminUsers);
+    const [driverCount] = await dbStorage.db.select({ count: sql<number>`count(*)::int` }).from(drivers);
+    const [userCount] = await dbStorage.db.select({ count: sql<number>`count(*)::int` }).from(users);
+
+    res.json({
+      adminExists: (adminCount?.count ?? 0) > 0,
+      driverExists: (driverCount?.count ?? 0) > 0,
+      userExists: (userCount?.count ?? 0) > 0,
+    });
+  } catch (error) {
+    console.error('خطأ في فحص حالة الإعداد:', error);
+    res.json({ adminExists: true, driverExists: true, userExists: true });
+  }
+});
+
+// دالة مساعدة للتحقق من كلمة المرور - تدعم كل من كلمات المرور المشفرة والعادية
+// وتقوم بترقية كلمات المرور العادية تلقائياً إلى مشفرة
+async function verifyPassword(inputPassword: string, storedPassword: string): Promise<boolean> {
+  if (!inputPassword || !storedPassword) return false;
+  
+  // التحقق إذا كانت كلمة المرور مشفرة بـ bcrypt
+  const isBcryptHash = storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2y$');
+  
+  if (isBcryptHash) {
+    // مقارنة مع الهاش
+    return await bcrypt.compare(inputPassword, storedPassword);
+  } else {
+    // مقارنة كلمة مرور عادية (غير مشفرة)
+    return inputPassword === storedPassword;
+  }
+}
+
+// دالة لتشفير كلمة المرور وتحديثها في قاعدة البيانات إذا كانت غير مشفرة
+async function upgradePasswordIfNeeded(
+  storedPassword: string,
+  inputPassword: string,
+  updateFn: (hashedPassword: string) => Promise<void>
+): Promise<void> {
+  const isBcryptHash = storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2y$');
+  if (!isBcryptHash) {
+    try {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(inputPassword, salt);
+      await updateFn(hashedPassword);
+      console.log('🔒 تم ترقية كلمة المرور إلى هاش bcrypt تلقائياً');
+    } catch (err) {
+      console.error('⚠️ فشل في ترقية كلمة المرور:', err);
+    }
+  }
+}
+
+// تسجيل الدخول للعملاء
+router.post('/login', async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'اسم المستخدم/الهاتف وكلمة المرور مطلوبان'
+      });
+    }
+
+    console.log('🔐 محاولة تسجيل دخول عميل:', identifier);
+
+    // البحث عن العميل في قاعدة البيانات (باسم المستخدم أو الهاتف أو البريد)
+    const userResult = await dbStorage.db
+      .select()
+      .from(users)
+      .where(
+        or(
+          eq(users.username, identifier),
+          eq(users.phone, identifier),
+          eq(users.email, identifier)
+        )
+      )
+      .limit(1);
+
+    if (userResult.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'بيانات الدخول غير صحيحة'
+      });
+    }
+
+    const user = userResult[0];
+
+    // التحقق من حالة الحساب
+    if (!user.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: 'الحساب غير مفعل'
+      });
+    }
+
+    // التحقق من كلمة المرور (يدعم المشفر والعادي)
+    const isPasswordValid = await verifyPassword(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'بيانات الدخول غير صحيحة'
+      });
+    }
+
+    // ترقية كلمة المرور تلقائياً إذا كانت غير مشفرة
+    await upgradePasswordIfNeeded(user.password, password, async (hashedPwd) => {
+      await dbStorage.db.update(users).set({ password: hashedPwd }).where(eq(users.id, user.id));
+    });
+
+    const token = user.id;
+    console.log('🎉 تم تسجيل الدخول بنجاح للعميل:', user.name);
+    
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        userType: 'customer'
+      },
+      message: 'تم تسجيل الدخول بنجاح'
+    });
+
+  } catch (error) {
+    console.error('خطأ في تسجيل دخول العميل:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في الخادم'
+    });
+  }
+});
+
+// التحقق من صحة الرمز وجلب بيانات المستخدم
+router.post('/validate', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'غير مصرح'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    // البحث عن المستخدم باستخدام المعرف
+    const userResult = await dbStorage.db
+      .select()
+      .from(users)
+      .where(eq(users.id, token))
+      .limit(1);
+
+    if (userResult.length === 0) {
+      // التحقق من السائقين أيضاً
+      const driverResult = await dbStorage.db
+        .select()
+        .from(drivers)
+        .where(eq(drivers.id, token))
+        .limit(1);
+      
+      if (driverResult.length > 0) {
+        const driver = driverResult[0];
+        return res.json({
+          success: true,
+          user: {
+            id: driver.id,
+            name: driver.name,
+            phone: driver.phone,
+            userType: 'driver'
+          }
+        });
+      }
+
+      // التحقق من المديرين أيضاً
+      const adminResult = await dbStorage.db
+        .select()
+        .from(adminUsers)
+        .where(eq(adminUsers.id, token))
+        .limit(1);
+      
+      if (adminResult.length > 0) {
+        const admin = adminResult[0];
+        return res.json({
+          success: true,
+          user: {
+            id: admin.id,
+            name: admin.name,
+            email: admin.email,
+            userType: 'admin'
+          }
+        });
+      }
+
+      return res.status(401).json({
+        success: false,
+        message: 'جلسة غير صالحة'
+      });
+    }
+
+    const user = userResult[0];
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        userType: 'customer'
+      }
+    });
+  } catch (error) {
+    console.error('خطأ في التحقق من الرمز:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في الخادم'
+    });
+  }
+});
+
+// تسجيل عميل جديد
+router.post('/register', async (req, res) => {
+  try {
+    const validatedData = insertUserSchema.parse(req.body);
+    
+    // التحقق من وجود المستخدم مسبقاً
+    const existingUser = await dbStorage.db
+      .select()
+      .from(users)
+      .where(
+        or(
+          eq(users.username, validatedData.username),
+          validatedData.phone ? eq(users.phone, validatedData.phone) : undefined
+        )
+      )
+      .limit(1);
+
+    if (existingUser.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'اسم المستخدم أو رقم الهاتف مسجل مسبقاً'
+      });
+    }
+
+    // تشفير كلمة المرور دائماً عند التسجيل
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(validatedData.password, salt);
+
+    const [newUser] = await dbStorage.db
+      .insert(users)
+      .values({ ...validatedData, password: hashedPassword })
+      .returning();
+
+    const token = newUser.id;
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        username: newUser.username,
+        email: newUser.email,
+        phone: newUser.phone,
+        userType: 'customer'
+      },
+      message: 'تم إنشاء الحساب بنجاح'
+    });
+  } catch (error) {
+    console.error('خطأ في تسجيل عميل جديد:', error);
+    res.status(400).json({
+      success: false,
+      message: 'بيانات التسجيل غير صحيحة'
+    });
+  }
+});
 
 // تسجيل الدخول للمديرين
 router.post('/admin/login', async (req, res) => {
@@ -21,14 +305,15 @@ router.post('/admin/login', async (req, res) => {
 
     console.log('🔐 محاولة تسجيل دخول مدير:', email);
 
-    // البحث عن المدير في قاعدة البيانات
+    // البحث عن المدير في قاعدة البيانات (بالبريد أو اسم المستخدم أو الهاتف)
     const adminResult = await dbStorage.db
       .select()
       .from(adminUsers)
       .where(
         or(
           eq(adminUsers.email, email),
-          eq(adminUsers.username, email)
+          eq(adminUsers.username, email),
+          eq(adminUsers.phone, email)
         )
       )
       .limit(1);
@@ -50,21 +335,30 @@ router.post('/admin/login', async (req, res) => {
       });
     }
 
-    // التحقق من كلمة المرور (مقارنة مباشرة بدون تشفير)
-    const isPasswordValid = password === admin.password;
+    // التحقق من كلمة المرور (يدعم المشفر والعادي)
+    const isPasswordValid = await verifyPassword(password, admin.password);
 
     if (!isPasswordValid) {
+      console.log('❌ كلمة المرور غير صحيحة للمدير:', email);
       return res.status(401).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
       });
     }
 
-    // إنشاء رمز مميز بسيط
-    const token = randomUUID();
+    // ترقية كلمة المرور تلقائياً إذا كانت غير مشفرة
+    await upgradePasswordIfNeeded(admin.password, password, async (hashedPwd) => {
+      await dbStorage.db.update(adminUsers).set({ password: hashedPwd }).where(eq(adminUsers.id, admin.id));
+    });
 
+    const token = admin.id;
     console.log('🎉 تم تسجيل الدخول بنجاح للمدير:', admin.name);
     
+    let permissions: string[] = [];
+    try {
+      permissions = admin.permissions ? JSON.parse(admin.permissions) : [];
+    } catch {}
+
     res.json({
       success: true,
       token,
@@ -72,7 +366,9 @@ router.post('/admin/login', async (req, res) => {
         id: admin.id,
         name: admin.name,
         email: admin.email,
-        userType: 'admin'
+        phone: admin.phone,
+        userType: admin.userType,
+        permissions,
       },
       message: 'تم تسجيل الدخول بنجاح'
     });
@@ -108,7 +404,6 @@ router.post('/driver/login', async (req, res) => {
       .limit(1);
 
     if (driverResult.length === 0) {
-      console.log('❌ لم يتم العثور على سائق بالهاتف:', phone);
       return res.status(401).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
@@ -116,7 +411,6 @@ router.post('/driver/login', async (req, res) => {
     }
 
     const driver = driverResult[0];
-    console.log('✅ تم العثور على السائق:', driver.name);
 
     // التحقق من حالة الحساب
     if (!driver.isActive) {
@@ -126,28 +420,22 @@ router.post('/driver/login', async (req, res) => {
       });
     }
 
-    // التحقق من كلمة المرور - دعم كلمات المرور المشفرة وغير المشفرة
-    let isPasswordValid = false;
-    
-    // محاولة التحقق من كلمة المرور المشفرة أولاً
-    try {
-      isPasswordValid = await bcrypt.compare(password, driver.password);
-    } catch (error) {
-      // إذا فشل التشفير، جرب المقارنة المباشرة (للبيانات القديمة)
-      isPasswordValid = password === driver.password;
-    }
+    // التحقق من كلمة المرور (يدعم المشفر والعادي)
+    const isPasswordValid = await verifyPassword(password, driver.password);
 
     if (!isPasswordValid) {
-      console.log('❌ كلمة المرور غير صحيحة للسائق:', driver.name);
       return res.status(401).json({
         success: false,
         message: 'بيانات الدخول غير صحيحة'
       });
     }
 
-    // إنشاء رمز مميز بسيط
-    const token = randomUUID();
+    // ترقية كلمة المرور تلقائياً إذا كانت غير مشفرة
+    await upgradePasswordIfNeeded(driver.password, password, async (hashedPwd) => {
+      await dbStorage.db.update(drivers).set({ password: hashedPwd }).where(eq(drivers.id, driver.id));
+    });
 
+    const token = driver.id;
     console.log('🎉 تم تسجيل الدخول بنجاح للسائق:', driver.name);
     
     res.json({
