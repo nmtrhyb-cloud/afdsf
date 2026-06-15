@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { useLocation } from 'wouter';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 interface MenuItemCardProps {
   item: any; // Using any to support both MenuItem and Mapped SpecialOffer
@@ -30,6 +31,7 @@ export default function MenuItemCard({
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
+  const { isOnline } = useNetworkStatus();
 
   // Check if item is in favorites
   const { data: favoriteStatus } = useQuery<{ isFavorite: boolean }>({
@@ -47,8 +49,10 @@ export default function MenuItemCard({
     mutationFn: async () => {
       if (item.isBannerOffer) return;
       if (!isAuthenticated) {
-        setLocation('/auth');
-        return;
+        throw new Error('not_authenticated');
+      }
+      if (!isOnline) {
+        throw new Error('no_connection');
       }
 
       if (favoriteStatus?.isFavorite) {
@@ -70,6 +74,29 @@ export default function MenuItemCard({
         description: favoriteStatus?.isFavorite ? `تمت إزالة ${item.name} من قائمة مفضلاتك` : `تم إضافة ${item.name} إلى قائمة مفضلاتك`,
       });
     },
+    onError: (error: any) => {
+      if (error?.message === 'not_authenticated') {
+        toast({
+          title: "يجب تسجيل الدخول",
+          description: "يرجى إنشاء حساب أو تسجيل الدخول لإضافة المنتجات إلى المفضلة",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (error?.message === 'no_connection') {
+        toast({
+          title: "لا يوجد اتصال بالإنترنت",
+          description: "يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "خطأ في المفضلة",
+        description: "حدث خطأ أثناء تحديث المفضلة، يرجى المحاولة مرة أخرى",
+        variant: "destructive",
+      });
+    },
   });
 
   const handleAddToCart = (e: React.MouseEvent) => {
@@ -79,6 +106,15 @@ export default function MenuItemCard({
       if (item.menuItemId) {
         setLocation(`/product/${item.menuItemId}`);
       }
+      return;
+    }
+
+    if (!isOnline) {
+      toast({
+        title: "لا يوجد اتصال بالإنترنت",
+        description: "يرجى التحقق من اتصالك بالإنترنت لإضافة المنتجات",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -92,10 +128,6 @@ export default function MenuItemCard({
     }
     
     addItem(item, restaurantId, restaurantName);
-    toast({
-      title: "تمت الإضافة للسلة",
-      description: `تم إضافة ${item.name} للسلة`,
-    });
   };
 
   const handleToggleFavorite = (e: React.MouseEvent) => {

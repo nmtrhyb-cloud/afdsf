@@ -4,7 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, Image as ImageIcon, Loader2, X } from 'lucide-react';
-import { uploadImage } from '@/lib/supabase';
 
 interface ImageUploadProps {
   label: string;

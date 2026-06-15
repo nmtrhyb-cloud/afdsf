@@ -482,7 +482,7 @@ export default function DriversManagement() {
                 
                 <div className="text-center p-3 bg-yellow-50 rounded-lg">
                   <div className="text-2xl font-bold text-yellow-600" data-testid="stats-total-earnings">
-                    {Number(driverStats.totalEarnings || 0).toFixed(2)} ر.س
+                    {Number(driverStats.totalEarnings || 0).toFixed(2)} ريال
                   </div>
                   <div className="text-sm text-gray-600">إجمالي الأرباح</div>
                 </div>

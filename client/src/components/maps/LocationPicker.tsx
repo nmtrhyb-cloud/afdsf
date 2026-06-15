@@ -70,8 +70,8 @@ export default function LocationPicker({
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [showResults, setShowResults] = useState(false);
 
-  // Default center (Riyadh, Saudi Arabia)
-  const defaultCenter: [number, number] = [24.7136, 46.6753];
+  // المركز الافتراضي (صنعاء، اليمن)
+  const defaultCenter: [number, number] = [15.3694, 44.1910];
   const [mapCenter, setMapCenter] = useState<[number, number]>(
     position || initialLocation || defaultCenter
   );

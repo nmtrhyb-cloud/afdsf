@@ -2,14 +2,11 @@ import React, { useState } from 'react';
 import { useLocation } from 'wouter';
 import { useToast } from '@/hooks/use-toast';
 import { 
-  Globe, 
   ShoppingCart, 
   Heart, 
   User, 
   Search,
   Menu as MenuIcon,
-  X,
-  Languages
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +14,8 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useUiSettings } from '@/context/UiSettingsContext';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { CustomerNotificationsPanel } from './CustomerNotificationsPanel';
+import waselLogo from '@assets/wasel-logo.png';
 
 export const TopBar: React.FC = () => {
   const [, setLocation] = useLocation();
@@ -29,7 +27,9 @@ export const TopBar: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const logoUrl = getSetting('header_logo_url') || getSetting('logo_url', '');
+  const logoUrl = getSetting('header_logo_url') || getSetting('logo_url') || waselLogo;
+  const appName = getSetting('app_name') || 'واصل';
+  const appNameEn = getSetting('app_name_en') || 'WASEL';
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,121 +53,164 @@ export const TopBar: React.FC = () => {
       {settingsLoading ? (
         <div className="h-10 md:h-16 w-24 bg-gray-100 animate-pulse rounded-lg" />
       ) : logoUrl ? (
-        <img src={logoUrl} alt="طمطوم" className="h-10 md:h-16 w-auto object-contain" />
+        <img src={logoUrl} alt={appName} className="h-10 md:h-16 w-auto object-contain" />
       ) : (
-        <div className="text-2xl md:text-4xl font-black tracking-tighter select-none">
-          <span className="text-[#388e3c]">طم</span><span className="text-[#d32f2f]">طوم</span>
+        <div className="text-2xl md:text-4xl font-black tracking-tighter select-none text-white">
+          {appName}
         </div>
       )}
     </div>
   );
 
   return (
-    <div className="bg-white border-b sticky top-0 z-50">
-      {/* Desktop & Tablet Header */}
-      <div className="container mx-auto px-4 py-3 hidden md:flex items-center justify-between gap-8">
-        {/* Right side in RTL (Logo) */}
-        <Logo />
-
-        {/* Center: Search Bar */}
-        <div className="flex-1 max-w-2xl">
-          <form onSubmit={handleSearch} className="relative group">
-            <Input 
-              className="w-full pr-12 pl-4 h-12 bg-gray-100 border-2 border-transparent focus:border-primary/20 focus:bg-white rounded-xl transition-all text-base font-bold"
-              placeholder={t('search_placeholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <button type="submit" className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-primary transition-colors">
-              <Search className="h-6 w-6" />
-            </button>
-          </form>
-        </div>
-
-        {/* Left side in RTL (Icons) */}
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setLocation(user ? '/profile' : '/auth')}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
-            title={t('account')}
-          >
-            <User className="h-7 w-7 text-gray-700" />
-          </button>
-          
-          <button 
-            onClick={() => setLocation('/favorites')}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
-            title={t('favorites')}
-          >
-            <Heart className="h-7 w-7 text-gray-700" />
-          </button>
-
-          <button 
-            onClick={handleOpenCart}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
-            title={t('cart')}
+    <div className="sticky top-0 z-50">
+      {/* Desktop Header - dark navy with orange accent */}
+      <div className="bg-gradient-to-r from-[#0E1729] via-[#152033] to-[#0E1729] border-b border-white/10 hidden md:block shadow-lg">
+        <div className="container mx-auto px-4 py-2 flex items-center justify-between gap-8">
+          <div 
+            className="cursor-pointer shrink-0 flex items-center gap-3 group"
+            onClick={() => setLocation('/')}
+            data-testid="link-home-logo"
           >
             <div className="relative">
-              <ShoppingCart className="h-7 w-7 text-gray-700" />
-              {getItemCount() > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-[#d32f2f] text-white text-[10px] rounded-full h-5 w-5 flex items-center justify-center font-bold border-2 border-white">
-                  {getItemCount()}
-                </span>
-              )}
+              <div className="absolute inset-0 bg-[#F5A623] rounded-full blur-xl opacity-25 group-hover:opacity-40 transition-opacity" />
+              <img src={logoUrl} alt={appName} className="relative h-14 w-auto object-contain transition-transform group-hover:scale-105 drop-shadow-[0_0_15px_rgba(245,166,35,0.45)]" />
             </div>
-          </button>
+            <div className="flex flex-col leading-none">
+              <span className="text-2xl font-black text-white tracking-tight">{appName}</span>
+              <span className="text-[10px] font-bold text-[#F5A623] tracking-[0.35em] mt-1">{appNameEn}</span>
+            </div>
+          </div>
+
+          <div className="flex-1 max-w-2xl">
+            <form onSubmit={handleSearch} className="relative group">
+              <Input 
+                className="w-full pr-12 pl-4 h-12 bg-gray-100 border-2 border-transparent focus:border-primary/20 focus:bg-white rounded-xl transition-all text-base font-bold"
+                placeholder={t('search_placeholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <button type="submit" className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-primary transition-colors">
+                <Search className="h-6 w-6" />
+              </button>
+            </form>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setLocation(user ? '/profile' : '/auth')}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
+            >
+              <User className="h-7 w-7 text-gray-700" />
+            </button>
+            
+            <button 
+              onClick={() => setLocation('/favorites')}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
+            >
+              <Heart className="h-7 w-7 text-gray-700" />
+            </button>
+
+            <button 
+              onClick={handleOpenCart}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors relative"
+            >
+              <div className="relative">
+                <ShoppingCart className="h-7 w-7 text-gray-700" />
+                {getItemCount() > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-primary text-white text-[10px] rounded-full h-5 w-5 flex items-center justify-center font-bold border-2 border-white">
+                    {getItemCount()}
+                  </span>
+                )}
+              </div>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Header (App Style) */}
-      <div className="container mx-auto px-4 py-3 flex md:hidden items-center justify-between gap-2">
-        {/* Menu (Right in RTL) */}
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-12 w-12 shrink-0" 
-          onClick={() => document.getElementById('sidebar-trigger')?.click()}
-        >
-          <MenuIcon className="h-8 w-8 text-gray-700" />
-        </Button>
+      {/* Mobile Header - Modern glass design with navy gradient + amber accents */}
+      <div className="md:hidden relative bg-gradient-to-br from-[#0E1729] via-[#152033] to-[#0B1220] shadow-xl overflow-hidden">
+        {/* Decorative glow blobs */}
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-[#F5A623] opacity-20 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-44 h-44 rounded-full bg-[#FFC061] opacity-10 blur-3xl pointer-events-none" />
 
-        {/* Search & Icons Group */}
-        <div className="flex-1 flex items-center gap-2 bg-gray-100 rounded-full px-3 py-1">
-          <Search className="h-5 w-5 text-gray-400 shrink-0" />
-          <form onSubmit={handleSearch} className="flex-1">
-            <input 
-              className="w-full bg-transparent border-none focus:ring-0 text-xs font-bold h-10"
-              placeholder={t('search_placeholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </form>
-          <div className="flex items-center gap-1.5 border-r pr-2">
-            <button onClick={() => setLocation('/favorites')} className="p-1 relative">
-              <Heart className="h-7 w-7 text-gray-600" />
+        <div className="relative px-3 py-2.5 flex items-center justify-between gap-2">
+          {/* Right side (RTL leading): Menu + Notifications */}
+          <div className="flex items-center gap-1">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-10 w-10 text-white hover:bg-white/15 shrink-0 rounded-xl" 
+              onClick={() => document.getElementById('sidebar-trigger')?.click()}
+            >
+              <MenuIcon className="h-6 w-6" />
+            </Button>
+            <CustomerNotificationsPanel />
+          </div>
+
+          {/* Center: Brand pill with logo + name + status */}
+          <div 
+            className="flex-1 flex items-center justify-center cursor-pointer"
+            onClick={() => setLocation('/')}
+            data-testid="link-home-logo-mobile"
+          >
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
+              <div className="relative">
+                <div className="absolute inset-0 bg-[#F5A623] rounded-full blur-md opacity-50" />
+                <img src={logoUrl} alt={appName} className="relative h-8 w-8 object-contain drop-shadow-[0_0_8px_rgba(245,166,35,0.5)]" />
+              </div>
+              <div className="flex flex-col leading-none">
+                <span className="text-white font-black text-base">{appName}</span>
+                <span className="text-[9px] font-bold text-[#F5A623] tracking-[0.3em] mt-0.5">{appNameEn}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Left side (RTL trailing): Search + Cart */}
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={() => setIsSearchOpen(!isSearchOpen)}
+              className="h-10 w-10 flex items-center justify-center text-white hover:bg-white/15 rounded-xl transition-colors"
+              aria-label="search"
+            >
+              <Search className="h-5 w-5" />
             </button>
-            <button onClick={handleOpenCart} className="p-1 relative">
-              <ShoppingCart className="h-7 w-7 text-gray-600" />
+            <button
+              onClick={handleOpenCart}
+              className="h-10 w-10 flex items-center justify-center text-white hover:bg-white/15 rounded-xl transition-colors relative"
+              aria-label="cart"
+            >
+              <ShoppingCart className="h-5 w-5" />
               {getItemCount() > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-primary text-white text-[10px] rounded-full h-5 w-5 flex items-center justify-center font-bold">
+                <span className="absolute top-0.5 right-0.5 bg-[#F5A623] text-[#0E1729] text-[9px] rounded-full h-4 min-w-4 px-1 flex items-center justify-center font-black ring-2 ring-[#0E1729] shadow-lg">
                   {getItemCount()}
                 </span>
               )}
-            </button>
-            <button onClick={() => setLocation(user ? '/profile' : '/auth')} className="p-1">
-              <User className="h-7 w-7 text-gray-600" />
             </button>
           </div>
         </div>
 
-        {/* Logo (Left in RTL) */}
-        <div className="shrink-0">
-          <Logo />
-        </div>
-      </div>
+        {/* Mobile Search Bar - Expandable */}
+        {isSearchOpen && (
+          <div className="relative px-3 pb-3 -mt-1">
+            <form onSubmit={handleSearch} className="relative">
+              <input
+                autoFocus
+                className="w-full bg-white/95 text-slate-900 placeholder-slate-400 border border-white/30 rounded-2xl px-4 py-2.5 pr-11 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#F5A623] shadow-lg"
+                placeholder="ابحث عن مطعم أو طبق..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-[#F5A623] text-white flex items-center justify-center shadow-md">
+                <Search className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
+        )}
 
-      {/* Remove the separate Mobile Search Bar as it's now integrated */}
-      {/* <div className="md:hidden px-4 pb-3"> ... </div> */}
+        {/* Bottom curved decoration */}
+        <div className="relative h-3 bg-background rounded-t-3xl -mb-px" />
+      </div>
     </div>
   );
 };

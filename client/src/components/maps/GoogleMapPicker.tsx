@@ -11,8 +11,8 @@ const mapContainerStyle = {
 };
 
 const defaultCenter = {
-  lat: 24.7136,
-  lng: 46.6753, // Riyadh, Saudi Arabia
+  lat: 15.3694,
+  lng: 44.1910, // صنعاء، اليمن
 };
 
 interface LocationData {

@@ -525,8 +525,8 @@ export default function RestaurantManagement() {
                         </div>
                       </div>
                       <div className="flex items-center justify-between text-sm">
-                        <span>رسوم التوصيل: {restaurant.deliveryFee} ₪</span>
-                        <span>الحد الأدنى: {restaurant.minimumOrder} ₪</span>
+                        <span>رسوم التوصيل: {restaurant.deliveryFee} </span>
+                        <span>الحد الأدنى: {restaurant.minimumOrder} </span>
                       </div>
                     </div>
 
